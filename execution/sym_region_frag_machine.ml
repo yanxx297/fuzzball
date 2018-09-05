@@ -267,13 +267,13 @@ struct
 	      (loop
 		 (V.UnOp(V.NEG,
 			 V.BinOp(V.BITAND, e,
-				 V.UnOp(V.NOT, V.Constant(V.Int(ty, v)))))))
+				 V.UnOp(V.NOT, V.Constant(V.Int(ty, v)))))))*)
 	| V.BinOp(V.BITOR, e1, e2) ->
 	    let w1 = narrow_bitwidth form_man e1 and
 		w2 = narrow_bitwidth form_man e2 in
-(* 	      Printf.printf "In %s (OR) %s, widths are %d and %d\n" *)
-(* 		(V.exp_to_string e1) (V.exp_to_string e2) w1 w2; *)
-	      if min w1 w2 <= 8 then
+ 	      Printf.printf "In %s (OR) %s, widths are %d and %d\n" 
+ 		(V.exp_to_string e1) (V.exp_to_string e2) w1 w2;
+	      if min w1 w2 <= 12 then
 		(* x | y = x - (x & m) + ((x & m) | y)
 		   where m is a bitmask >= y. *)
 		let (e_x, e_y, w) = 
@@ -291,7 +291,7 @@ struct
 		      [V.UnOp(V.NEG, masked);
 		       V.BinOp(V.BITOR, masked, e_y)]
 	      else
-		[e] *)
+		[e] 
 	| V.Lval(V.Temp(var)) ->
 	    FormMan.if_expr_temp form_man var
 	      (fun e' -> loop e') [e] (fun v -> ())
@@ -449,6 +449,15 @@ struct
     let rec loop e =
       match e with
 	| V.BinOp(V.PLUS, e1, e2) -> (loop e1) @ (loop e2)
+        | V.BinOp(V.BITOR, e1, (V.Constant(V.Int(_, base)) as e2)) ->
+            (let wd = narrow_bitwidth form_man e1 in
+             let mask = 0xffffffff lsl wd in
+             let base = Int64.to_int base in
+               if mask land base = base then
+                 (loop e1) @ (loop e2)
+               else
+                 [e]
+            )
 	| V.Lval(V.Temp(var)) ->
 	    FormMan.if_expr_temp form_man var
 	      (fun e' -> loop e') [e] (fun v -> ())
