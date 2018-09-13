@@ -780,6 +780,14 @@ struct
 	collect e;
 	replace e
 
+    (* Warning: collapse_temps uses subexpr_to_temp_var_info which is maintained 
+       across FuzzBALL iterations. This means that a subexpression that is made
+       equal to a temp in one FuzzBALL iteration will be collapsed into that temp
+       in later iterations. This can affect caches in FuzzBALL that perform
+       syntactic equivalence checking of expressions (like SRFM.concrete_cache)
+       and cause a decision tree inconsistency because the cache isn't populated
+       with the same entries across FuzzBALL iterations. 
+    *)
     method private collapse_temps e =
       let rec loop e =
 	let e' = match e with
@@ -814,7 +822,8 @@ struct
     method private simplify_exp e =
       let e2 = self#expand_temps_1level e in
       let e3 = Frag_simplify.simplify_fp e2 in
-	self#collapse_temps e3
+      if expr_size e3 < expr_size e then e3 else e
+    (* self#collapse_temps e3 *)
 
     method private simplify (v:D.t) ty =
       D.inside_symbolic
@@ -858,6 +867,7 @@ struct
     method tempify_exp e ty =
       let e2 = self#simplify_exp e in
       match e2 with
+      | V.Lval(V.Temp(_)) -> e2
       | V.Constant(_) -> e2
       | _ ->
 	 V.Lval(V.Temp(self#make_temp_var e2 ty))

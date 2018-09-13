@@ -725,7 +725,11 @@ struct
 		(List.map V.exp_to_string syms)));
 	let cbase = List.fold_left Int64.add 0L cbases in
 	let (base, base_e, off_syms) = match (cbase, syms, ambig) with
-	  | (0L, [], []) -> raise NullDereference
+	  | (0L, [], []) -> 
+              (if !opt_no_sym_regions then
+                 (Some 0, None, [])
+               else
+                 raise NullDereference)
 	  (* The following two cases are applicable when applying
 	     table treatment for symbolic regions *)
 	  | (0L, [], [e]) -> (Some(self#region_for e), Some e, [])
