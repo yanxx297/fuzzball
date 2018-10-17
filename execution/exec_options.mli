@@ -172,6 +172,7 @@ val opt_arch : execution_arch ref
 val opt_trace_stmts : bool ref
 val opt_trace_eval : bool ref
 val opt_trace_client_reqs : bool ref
+val opt_trace_sym_mem : bool ref
 
 val asmir_arch : unit -> Asmir.arch
 

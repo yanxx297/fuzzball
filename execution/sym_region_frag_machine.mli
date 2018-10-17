@@ -248,5 +248,6 @@ sig
     val reg_to_var :(Fragment_machine.register_name, Vine.var) Hashtbl.t
     val mem :
       Granular_memory.GranularMemoryFunctor(D).granular_second_snapshot_memory
+    method add_sym_mem: int64 -> int64 -> unit
   end
 end

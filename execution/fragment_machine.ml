@@ -505,6 +505,8 @@ class virtual fragment_machine = object
   method virtual load_long_concretize  : int64 -> bool -> string -> int64
 
   method virtual make_sink_region : string -> int64 -> unit
+
+  method virtual add_sym_mem: int64 -> int64 -> unit
 end
 
 module FragmentMachineFunctor =
@@ -2772,5 +2774,26 @@ struct
     method load_long_concretize  addr (b:bool) (s:string)
       = self#load_long_conc addr
     method make_sink_region (s:string) (i:int64) = ()
+
+    val mutable sym_mem = []
+    method add_sym_mem base len = 
+      Printf.printf "Add sym mem 0x%Lx(+%d)\n" base (Int64.to_int len);
+      let rec merge l base len = 
+        match l with
+          | h::rest -> 
+              (let (left, right) = h in
+                 if base > right then
+                   h::(merge rest base len)
+                 else if (Int64.add base len) < left then
+                    (base, (Int64.add base len))::l
+                 else
+                   let left' = if left < base then left else base in
+                   let right' = if right > (Int64.add base len) then right else (Int64.add base len) in
+                     merge rest left' (Int64.sub right' left')
+              )
+          | [] ->
+              [(base, (Int64.add base len))]
+      in
+        sym_mem <- merge sym_mem base len;
   end
 end

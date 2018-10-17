@@ -194,6 +194,7 @@ let opt_arch = ref X86
 let opt_trace_stmts = ref false
 let opt_trace_eval = ref false
 let opt_trace_client_reqs = ref false
+let opt_trace_sym_mem = ref false                              
 
 let asmir_arch () =
   asmir_arch_of_execution_arch !opt_arch

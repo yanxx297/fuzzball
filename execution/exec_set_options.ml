@@ -219,6 +219,8 @@ let symbolic_state_cmdline_opts =
     ("-skip-call-ret-symbol-once", Arg.String
        (add_delimited_num_str_pair opt_skip_call_addr_symbol_once '='),
      "addr=symname Like -s-c-r-s, but always the same variable");
+    ("-trace-sym-mem", Arg.Set(opt_trace_sym_mem),
+     " Trace all the memory locations that has been set to symbolic");
   ]
 
 let slurp_file fname =
@@ -709,7 +711,9 @@ let make_symbolic_init (fm:Fragment_machine.fragment_machine)
        opt_extra_conditions := [];
        List.iter (fun (base, len) ->
 		    new_max len;
-		    fm#make_symbolic_region base (Int64.to_int len))
+		    if !opt_trace_sym_mem then
+                      fm#add_sym_mem base len;
+                    fm#make_symbolic_region base (Int64.to_int len))
 	 !opt_symbolic_regions;
        List.iter (fun (base, len) ->
 		    new_max len;
@@ -738,7 +742,9 @@ let make_symbolic_init (fm:Fragment_machine.fragment_machine)
 		    fm#store_symbolic_wcstr base (Int64.to_int len))
 	 !opt_symbolic_string16s;
        List.iter (fun (addr, varname) ->
-		    fm#store_symbolic_byte addr varname)
+                    (if !opt_trace_sym_mem then
+                       fm#add_sym_mem addr 1L;
+		    fm#store_symbolic_byte addr varname))
 	 !opt_symbolic_bytes;
        List.iter (fun (addr, varname) ->
 		    infl_man#store_symbolic_byte_influence addr varname)
