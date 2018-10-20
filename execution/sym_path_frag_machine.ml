@@ -913,6 +913,7 @@ struct
 
     method after_exploration =
       infl_man#after_exploration;
+      fm#after_exploration;
       if !opt_trace_working_ce_cache then
 	Printf.printf "CE cache stats: %Ld hits / %Ld refs\n"
 	  !ce_cache_hits !ce_cache_refs

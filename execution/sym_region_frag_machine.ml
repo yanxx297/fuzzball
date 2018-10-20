@@ -1679,36 +1679,38 @@ struct
 		maxval ty value)
 	  | SingleLocation(r', addr') -> r := r'; addr := addr'; false
 	in
-	if !r = Some 0 && (Int64.abs (fix_s32 !addr)) < 4096L then
-	  raise NullDereference;
-	if !opt_trace_stores then
-	  if not (ty = V.REG_8 && !r = None) then
-	    (if !opt_trace_eval then
-	       Printf.printf "    "; (* indent to match other details *)
-	     Printf.printf "Store to %s "
-	       (match !r with
-		  | None -> "sink"
-		  | Some 0 -> "conc. mem"
-		  | Some r_num -> "region " ^ (string_of_int r_num));
-	     Printf.printf "%08Lx = %s" !addr (D.to_string_32 value);
-	     (if !opt_use_tags then
-		Printf.printf " (%Ld @ %08Lx)" (D.get_tag value) location_id);
-	     Printf.printf "\n");
-	(match (self#started_symbolic, !opt_target_region_start, !r) with
-	   | (true, Some from, Some 0) ->
-	       (match self#target_store_condition !addr from value ty with
-		  | Some (offset, cond_v, wd) ->
-		      self#target_solve_single offset cond_v wd
-		  | None -> ())
-	   | _ -> ());
-	if not table_store_status then
-	  (match ty with
-	  | V.REG_8 -> self#store_byte_region !r !addr value
-	  | V.REG_16 -> self#store_short_region !r !addr value
-	  | V.REG_32 -> self#store_word_region !r !addr value
-	  | V.REG_64 -> self#store_long_region !r !addr value
-	  | _ -> failwith "Unsupported type in memory move")
-	else ()
+          if !r = Some 0 && (Int64.abs (fix_s32 !addr)) < 4096L then
+            raise NullDereference;          
+          if !opt_trace_sym_mem then
+            spfm#log_sym_update !addr (Int64.of_int ((V.bits_of_width ty)/8));
+          if !opt_trace_stores then
+            if not (ty = V.REG_8 && !r = None) then
+              (if !opt_trace_eval then
+                 Printf.printf "    "; (* indent to match other details *)
+               Printf.printf "Store to %s "
+                                         (match !r with
+                                            | None -> "sink"
+                                            | Some 0 -> "conc. mem"
+                                            | Some r_num -> "region " ^ (string_of_int r_num));
+               Printf.printf "%08Lx = %s" !addr (D.to_string_32 value);
+               (if !opt_use_tags then
+                  Printf.printf " (%Ld @ %08Lx)" (D.get_tag value) location_id);
+               Printf.printf "\n");
+          (match (self#started_symbolic, !opt_target_region_start, !r) with
+             | (true, Some from, Some 0) ->
+                 (match self#target_store_condition !addr from value ty with
+                    | Some (offset, cond_v, wd) ->
+                        self#target_solve_single offset cond_v wd
+                    | None -> ())
+             | _ -> ());
+          if not table_store_status then
+            (match ty with
+               | V.REG_8 -> self#store_byte_region !r !addr value
+               | V.REG_16 -> self#store_short_region !r !addr value
+               | V.REG_32 -> self#store_word_region !r !addr value
+               | V.REG_64 -> self#store_long_region !r !addr value
+               | _ -> failwith "Unsupported type in memory move")
+          else ()
 
     method concretize_misc =
       if !opt_arch = X86 then

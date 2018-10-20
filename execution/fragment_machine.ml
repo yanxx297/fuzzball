@@ -507,6 +507,7 @@ class virtual fragment_machine = object
   method virtual make_sink_region : string -> int64 -> unit
 
   method virtual add_sym_mem: int64 -> int64 -> unit
+  method virtual log_sym_update: int64 -> int64 -> unit
 end
 
 module FragmentMachineFunctor =
@@ -590,6 +591,7 @@ struct
     val mutable insns = []
 
     val mutable snap = (V.VarHash.create 1, V.VarHash.create 1)
+    val mutable sym_mem_update = []
 
     method init_prog (dl, sl) =
       List.iter
@@ -2758,7 +2760,15 @@ struct
     method set_iter_seed (i:int) = ()
     method random_byte = Random.int 256
     method finish_path = false
-    method after_exploration = ()
+
+    method after_exploration =
+      if !opt_trace_sym_mem then
+        let str = ref "memory update:" in
+          List.iter (fun (l, ty) ->
+                       str := !str^Printf.sprintf "(0x%Lx, %s) " l (V.type_to_string ty)
+          ) sym_mem_update;
+          Printf.printf "%s\n" !str;
+
     method make_x86_segtables_symbolic = ()
     method store_word_special_region (r:register_name) (i1:int64) (i2:int64)
       : unit =
@@ -2776,24 +2786,73 @@ struct
     method make_sink_region (s:string) (i:int64) = ()
 
     val mutable sym_mem = []
+
+    method log_sym_update addr len =
+      let round n =
+        if n < 0 then
+          (let str = Printf.sprintf "Invalid symbolic memory access length: %d" n in
+             failwith str)
+        else if n <= 2 then n
+        else if n < 4 then 2
+        else if n < 8 then 4
+        else 8
+      in
+      let rec loop l l1 h1 = 
+        match l with
+          | h::rest ->
+              (let (l2, h2) = h in
+                 if l1 > h2 then loop rest l1 h1
+                 else if h1 < l2 then ()
+                 else 
+                   let l' = if l1 > l2 then l1 else l2 in
+                   let h' = if h1 > h2 then h2 else h1 in
+                   let len' = round (h' - l') in
+                   let ty = 
+                     (match len' with
+                        | 1 -> Some V.REG_8
+                        | 2 -> Some V.REG_16
+                        | 4 -> Some V.REG_32
+                        | 8 -> Some V.REG_64
+                        | _ -> None
+                     )
+                   in
+                     match ty with
+                       | Some t ->
+                           (let item = ((Int64.of_int l'), t) in 
+                              if not (List.exists (fun e ->
+                                                     if e = item then true else false)
+                                        sym_mem_update) then
+                                sym_mem_update <- item::sym_mem_update;
+                              if h' != h1 then loop l (l'+len') h1)
+                       | None -> ()
+              )
+          | [] -> ()
+      in
+        loop sym_mem (Int64.to_int addr) (Int64.to_int (Int64.add addr len))
+                
     method add_sym_mem base len = 
       Printf.printf "Add sym mem 0x%Lx(+%d)\n" base (Int64.to_int len);
-      let rec merge l base len = 
+      let rec merge l l1 h1 = 
         match l with
           | h::rest -> 
-              (let (left, right) = h in
-                 if base > right then
-                   h::(merge rest base len)
-                 else if (Int64.add base len) < left then
-                    (base, (Int64.add base len))::l
+              (let (l2, h2) = h in
+                 if l1 > h2 then
+                   h::(merge rest l1 h1)
+                 else if h1 < l2 then
+                    (l1, h1)::l
                  else
-                   let left' = if left < base then left else base in
-                   let right' = if right > (Int64.add base len) then right else (Int64.add base len) in
-                     merge rest left' (Int64.sub right' left')
+                   let l' = if l1 > l2 then l2 else l1 in
+                   let h' = if h1 > h2 then h1 else h2 in
+                     merge rest l' h'
               )
           | [] ->
-              [(base, (Int64.add base len))]
+              [(l1, h1)]
       in
-        sym_mem <- merge sym_mem base len;
+        sym_mem <- merge sym_mem (Int64.to_int base) (Int64.to_int (Int64.add base len));
+        let str = ref "" in
+          List.iter (fun (l, h) ->
+                         str := !str ^ (Printf.sprintf "(0x%Lx, 0x%Lx) " (Int64.of_int l) (Int64.of_int h))
+          ) sym_mem;
+          Printf.printf "%s\n" !str
   end
 end
