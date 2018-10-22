@@ -2788,15 +2788,6 @@ struct
     val mutable sym_mem = []
 
     method log_sym_update addr len =
-      let round n =
-        if n < 0 then
-          (let str = Printf.sprintf "Invalid symbolic memory access length: %d" n in
-             failwith str)
-        else if n <= 2 then n
-        else if n < 4 then 2
-        else if n < 8 then 4
-        else 8
-      in
       let rec loop l l1 h1 = 
         match l with
           | h::rest ->
@@ -2806,25 +2797,16 @@ struct
                  else 
                    let l' = if l1 > l2 then l1 else l2 in
                    let h' = if h1 > h2 then h2 else h1 in
-                   let len' = round (h' - l') in
-                   let ty = 
-                     (match len' with
-                        | 1 -> Some V.REG_8
-                        | 2 -> Some V.REG_16
-                        | 4 -> Some V.REG_32
-                        | 8 -> Some V.REG_64
-                        | _ -> None
-                     )
-                   in
-                     match ty with
-                       | Some t ->
-                           (let item = ((Int64.of_int l'), t) in 
-                              if not (List.exists (fun e ->
-                                                     if e = item then true else false)
-                                        sym_mem_update) then
-                                sym_mem_update <- item::sym_mem_update;
-                              if h' != h1 then loop l (l'+len') h1)
-                       | None -> ()
+                   let len' = h' - l' in
+                     if len' > 0 then
+                       (for offset = 0 to (len'-1) do
+                          let item = ((Int64.of_int (l'+offset)), V.REG_8) in
+                            if not (List.exists (fun e ->
+                                                   if e = item then true else false)
+                                      sym_mem_update) then
+                              sym_mem_update <- item::sym_mem_update;
+                        done;
+                        if h' != h1 then loop l h' h1)
               )
           | [] -> ()
       in
