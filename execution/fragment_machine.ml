@@ -1673,6 +1673,7 @@ struct
 
     method reset () =
       mem#reset ();
+      sym_mem_update <- [];
       (match snap with (r, t) ->
 	 move_hash r reg_store;
 	 move_hash t temps);
@@ -2759,7 +2760,26 @@ struct
     method print_tree (oc:out_channel) = ()
     method set_iter_seed (i:int) = ()
     method random_byte = Random.int 256
-    method finish_path = false
+    
+    val mutable prog_form = Hashtbl.create 10
+    method finish_path =
+      if !opt_trace_sym_mem then
+        (let rec loop l =
+           match l with
+             | h::rest -> 
+                 if rest = [] then h else V.BinOp(V.BITAND, h, (loop rest))
+             | [] -> failwith ""
+         in
+           List.iter (fun (addr, _) ->
+                        let e = D.to_symbolic_8 (self#load_byte addr) in
+                        let old_form = 
+                          (try Hashtbl.find prog_form addr with
+                             | Not_found -> V.Constant(V.Int(V.REG_8, 0L)) 
+                          ) in
+                          Hashtbl.replace prog_form addr 
+                            (V.Ite((loop self#get_path_cond), e, old_form))
+           ) sym_mem_update);
+       false
 
     method after_exploration =
       if !opt_trace_sym_mem then
@@ -2768,6 +2788,9 @@ struct
                        str := !str^Printf.sprintf "(0x%Lx, %s) " l (V.type_to_string ty)
           ) sym_mem_update;
           Printf.printf "%s\n" !str;
+          Hashtbl.iter (fun addr e ->
+                          Printf.printf "mem[0x%Lx] = %s\n" addr (V.exp_to_string e)
+          ) prog_form
 
     method make_x86_segtables_symbolic = ()
     method store_word_special_region (r:register_name) (i1:int64) (i2:int64)
