@@ -164,6 +164,7 @@ val pp_lval : (string -> unit) -> lvalue -> unit
 val pp_value : (string -> unit) -> value -> unit
 val pp_typ : (string -> unit) -> typ -> unit
 val exp_to_string : exp -> string
+val exp_to_line : exp -> string
 val lval_to_string : lvalue -> string
 val decl_to_string : decl -> string
 val var_to_string : var -> string
@@ -180,6 +181,7 @@ val format_stmt :  Format.formatter -> stmt -> unit
 val format_program : Format.formatter -> program -> unit
 val format2pp : (Format.formatter -> 'a -> unit) -> (string -> unit) -> 'a -> unit
 val format2string : (Format.formatter -> 'a -> unit) -> 'a -> string
+val format2line : (Format.formatter -> 'a -> unit) -> 'a -> string
 
 
 type 'a visit_action =

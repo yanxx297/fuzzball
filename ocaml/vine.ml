@@ -856,6 +856,21 @@ let format2string format_fun x =
   let () = Format.pp_print_flush ft () in
     Buffer.contents buf
 
+(** A modified version of format2string that outputs string without newline*)
+let format2line format_fun x =
+  let buf = Buffer.create 1000 in
+  let ft = Format.formatter_of_buffer buf in
+  let (out,flush,newline,spaces) =
+    Format.pp_get_all_formatter_output_functions ft ()
+  in
+  let newline' () = out " " 0 1 in
+  let () = Format.pp_set_all_formatter_output_functions ft
+    ~out:out ~flush:flush ~newline:newline' ~spaces:(fun _ -> spaces 1)
+  in
+  let () = format_fun ft x in
+  let () = Format.pp_print_flush ft () in
+    Buffer.contents buf
+      
 (** "Pretty print" a type
     @param pr the printer to use (e.g. print_string)
     @param t the type
@@ -901,6 +916,8 @@ let pp_program = format2pp format_program
 
 (** convert an expression to a string *)
 let exp_to_string = format2string format_exp
+
+let exp_to_line = format2line format_exp
 
 let lval_to_string = format2string format_lval
 

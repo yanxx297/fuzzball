@@ -991,7 +991,7 @@ struct
           ) sym_mem_update;
           Printf.printf "%s\n" !str;
           Hashtbl.iter (fun addr e ->
-                          Printf.printf "mem[0x%Lx] = %s\n" addr (V.exp_to_string e)
+                          Printf.printf "mem[0x%Lx] = %s\n" addr (V.exp_to_line e)
           ) prog_form;
       if !opt_trace_working_ce_cache then
 	Printf.printf "CE cache stats: %Ld hits / %Ld refs\n"
