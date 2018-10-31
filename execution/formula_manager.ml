@@ -1274,6 +1274,16 @@ struct
 	walk root_exp;
 	List.rev !decls_l
 
+    method get_temps exp = 
+      let decls = self#walk_decls exp in
+      let res = ref [] in
+        List.iter (fun v ->
+                     match v with
+                       | QE.TempVar(v, e) -> res := (v, e)::!res
+                       | _ -> ()
+        ) decls;
+        List.rev !res
+
     method one_cond_for_solving cond seen_hash =
       let saw_var v =
 	V.VarHash.replace seen_hash v () in

@@ -986,13 +986,26 @@ struct
       infl_man#after_exploration;
       if !opt_trace_sym_mem then
         let str = ref "memory update:" in
+        let temps = ref [] in
+        let fd = open_out "/tmp/output" in
+        let cmp (v1, _) (v2, _) = 
+          let (n1, _, _) = v1 
+          and (n2, _, _) = v2 in
+            compare n1 n2
+        in
           List.iter (fun (l, ty) ->
                        str := !str^Printf.sprintf "(0x%Lx, %s) " l (V.type_to_string ty)
           ) sym_mem_update;
           Printf.printf "%s\n" !str;
           Hashtbl.iter (fun addr e ->
-                          Printf.printf "mem[0x%Lx] = %s\n" addr (V.exp_to_line e)
+                          Printf.fprintf fd "mem[0x%Lx] = %s\n" addr (V.exp_to_line e);
+                          let temps' = form_man#get_temps e in
+                            temps := (List.sort_uniq cmp (List.merge cmp !temps temps'))
           ) prog_form;
+          List.iter (fun (v, e) ->
+                       Printf.fprintf fd "%s = %s\n" (V.var_to_string v) (V.exp_to_line e) 
+          ) !temps;
+          close_out fd;
       if !opt_trace_working_ce_cache then
 	Printf.printf "CE cache stats: %Ld hits / %Ld refs\n"
 	  !ce_cache_hits !ce_cache_refs

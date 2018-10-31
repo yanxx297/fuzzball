@@ -94,6 +94,7 @@ sig
       Query_engine.qe_decl list * Vine.exp * Vine.var list
 
     method measure_size : (int * int)
+    method get_temps: Vine.exp -> (Vine.var * Vine.exp) list
   end
 
   val if_expr_temp : formula_manager -> Vine.var ->
