@@ -998,6 +998,9 @@ struct
                        str := !str^Printf.sprintf "(0x%Lx, %s) " l (V.type_to_string ty)
           ) sym_mem_update;
           Printf.printf "%s\n" !str;
+          List.iter (fun (_, s, _) ->
+                       Printf.fprintf fd "%s\n" s
+          ) (form_man#input_dl);
           Hashtbl.iter (fun addr e ->
                           let temps' = form_man#get_temps e in
                             temps := (List.sort_uniq cmp (List.merge cmp !temps temps'))
