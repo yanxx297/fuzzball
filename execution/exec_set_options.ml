@@ -704,6 +704,7 @@ let apply_cmdline_opts_nonlinux (fm : Fragment_machine.fragment_machine) =
 let make_symbolic_init (fm:Fragment_machine.fragment_machine) 
     (infl_man:Exec_no_influence.influence_manager) =
   (fun () ->
+     Printf.printf "In make_symbolic_init\n";
      let new_max i =
        max_input_string_length :=
 	 max (!max_input_string_length) (Int64.to_int i)
@@ -711,8 +712,9 @@ let make_symbolic_init (fm:Fragment_machine.fragment_machine)
        opt_extra_conditions := [];
        List.iter (fun (base, len) ->
 		    new_max len;
-		    if !opt_trace_sym_mem then
-                      fm#add_sym_mem base len;
+		    if !opt_trace_sym_mem then                      
+                      let varname = "input"^(string_of_int fm#get_symbolic_string_id) in
+                        fm#add_sym_mem varname (Int64.to_int base) (Int64.to_int len);
                     fm#make_symbolic_region base (Int64.to_int len))
 	 !opt_symbolic_regions;
        List.iter (fun (base, len) ->
@@ -743,7 +745,7 @@ let make_symbolic_init (fm:Fragment_machine.fragment_machine)
 	 !opt_symbolic_string16s;
        List.iter (fun (addr, varname) ->
                     (if !opt_trace_sym_mem then
-                       fm#add_sym_mem addr 1L;
+                       fm#add_sym_mem varname (Int64.to_int addr) 1;
 		    fm#store_symbolic_byte addr varname))
 	 !opt_symbolic_bytes;
        List.iter (fun (addr, varname) ->

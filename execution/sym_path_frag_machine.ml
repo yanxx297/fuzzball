@@ -874,60 +874,24 @@ struct
 	      opt_trace_taint := ta)
 	!opt_trace_detailed_ranges
 	  
-    val mutable sym_mem = []
-    val mutable sym_mem_update = []
+    val mutable sym_mem = Hashtbl.create 4194304
+    val mutable sym_mem_update = Hashtbl.create 20
     val mutable prog_form = Hashtbl.create 10
 
-    method log_sym_update addr len =
-      let rec loop l l1 h1 = 
-        match l with
-          | h::rest ->
-              (let (l2, h2) = h in
-                 if l1 > h2 then loop rest l1 h1
-                 else if h1 < l2 then ()
-                 else 
-                   let l' = if l1 > l2 then l1 else l2 in
-                   let h' = if h1 > h2 then h2 else h1 in
-                   let len' = h' - l' in
-                     if len' > 0 then
-                       (for offset = 0 to (len'-1) do
-                          let item = ((Int64.of_int (l'+offset)), V.REG_8) in
-                            if not (List.exists (fun e ->
-                                                   if e = item then true else false)
-                                      sym_mem_update) then
-                              sym_mem_update <- item::sym_mem_update;
-                        done;
-                        if h' != h1 then loop l h' h1)
-              )
-          | [] -> ()
-      in
-        loop sym_mem (Int64.to_int addr) (Int64.to_int (Int64.add addr len))
-                
-    method add_sym_mem base len = 
-      Printf.printf "Add sym mem 0x%Lx(+%d)\n" base (Int64.to_int len);
-      let rec merge l l1 h1 = 
-        match l with
-          | h::rest -> 
-              (let (l2, h2) = h in
-                 if l1 > h2 then
-                   h::(merge rest l1 h1)
-                 else if h1 < l2 then
-                    (l1, h1)::l
-                 else
-                   let l' = if l1 > l2 then l2 else l1 in
-                   let h' = if h1 > h2 then h1 else h2 in
-                     merge rest l' h'
-              )
-          | [] ->
-              [(l1, h1)]
-      in
-        sym_mem <- merge sym_mem (Int64.to_int base) (Int64.to_int (Int64.add base len));
-        let str = ref "" in
-          List.iter (fun (l, h) ->
-                         str := !str ^ (Printf.sprintf "(0x%Lx, 0x%Lx) " (Int64.of_int l) (Int64.of_int h))
-          ) sym_mem;
-          Printf.printf "%s\n" !str
+    method log_sym_update base len =
+      for offset = 0 to (len-1) do
+        let addr = base+offset in
+          match Hashtbl.find_opt sym_mem addr with
+            | Some s -> Hashtbl.replace sym_mem_update addr s
+            | None -> ()
+      done;
 
+    method add_sym_mem varname base len = 
+      Printf.printf "Add sym mem 0x%Lx(+%d)\n" (Int64.of_int base) len;
+      for i = 0 to (len-1) do
+        Hashtbl.replace sym_mem (base+i) varname 
+      done;
+ 
     method finish_path =
       dt#set_heur 1;
       dt#mark_all_seen;
@@ -939,14 +903,14 @@ struct
                  if rest = [] then h else V.BinOp(V.BITAND, h, (loop rest))
              | [] -> failwith ""
          in
-           List.iter (fun (addr, _) ->
-                        let e = D.to_symbolic_8 (self#load_byte addr) in
-                        let old_form = 
+           Hashtbl.iter (fun addr varname ->
+                        let e = D.to_symbolic_8 (self#load_byte (Int64.of_int addr)) in
+                        let (_, old_form) = 
                           (try Hashtbl.find prog_form addr with
-                             | Not_found -> V.Constant(V.Int(V.REG_8, 0L)) 
+                             | Not_found -> ("", V.Constant(V.Int(V.REG_8, 0L))) 
                           ) in
                           Hashtbl.replace prog_form addr 
-                            (V.Ite((loop self#get_path_cond), e, old_form))
+                            (varname, V.Ite((loop self#get_path_cond), e, old_form))
            ) sym_mem_update);
       if !opt_trace_binary_paths then
 	Printf.printf "Path: %s\n" dt#get_hist_str;
@@ -972,7 +936,7 @@ struct
 
     method reset () =
       fm#reset ();
-      sym_mem_update <- [];
+      Hashtbl.reset sym_mem_update;
       form_man#reset_mem_axioms;
       path_cond <- [];
       V.VarHash.clear var_seen_hash;
@@ -994,22 +958,26 @@ struct
           and (n2, _, _) = v2 in
             compare n1 n2
         in
-          List.iter (fun (l, ty) ->
-                       str := !str^Printf.sprintf "(0x%Lx, %s) " l (V.type_to_string ty)
+          Hashtbl.iter (fun addr s ->
+                       str := !str^Printf.sprintf "%s(0x%Lx) " s (Int64.of_int addr)
           ) sym_mem_update;
           Printf.printf "%s\n" !str;
           List.iter (fun (_, s, _) ->
                        Printf.fprintf fd "%s\n" s
           ) (form_man#input_dl);
-          Hashtbl.iter (fun addr e ->
+          Hashtbl.iter (fun addr (_, e) ->
                           let temps' = form_man#get_temps e in
                             temps := (List.sort_uniq cmp (List.merge cmp !temps temps'))
           ) prog_form;
           List.iter (fun (v, e) ->
                        Printf.fprintf fd "%s = %s\n" (V.var_to_string v) (V.exp_to_line e) 
           ) !temps;
-          Hashtbl.iter (fun addr e ->
-                          Printf.fprintf fd "mem[0x%Lx] = %s\n" addr (V.exp_to_line e);
+          Hashtbl.iter (fun addr (varname, e) ->
+                          let varname = 
+                            (if String.sub varname 0 3 = "in_" then "out_"^(String.sub varname 3 ((String.length varname)-3))
+                             else varname)
+                          in
+                          Printf.fprintf fd "%s = %s\n" varname (V.exp_to_line e);
           ) prog_form;
           close_out fd;
       if !opt_trace_working_ce_cache then

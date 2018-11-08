@@ -1682,7 +1682,7 @@ struct
           if !r = Some 0 && (Int64.abs (fix_s32 !addr)) < 4096L then
             raise NullDereference;          
           if !opt_trace_sym_mem then
-            spfm#log_sym_update !addr (Int64.of_int ((V.bits_of_width ty)/8));
+            spfm#log_sym_update (Int64.to_int !addr) ((V.bits_of_width ty)/8);
           if !opt_trace_stores then
             if not (ty = V.REG_8 && !r = None) then
               (if !opt_trace_eval then

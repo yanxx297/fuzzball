@@ -254,7 +254,8 @@ sig
     method load_word_concretize  : int64 -> bool -> string -> int64
     method load_long_concretize  : int64 -> bool -> string -> int64
     method make_sink_region : string -> int64 -> unit
-    method add_sym_mem: int64 -> int64 -> unit
-    method log_sym_update: int64 -> int64 -> unit
+    method add_sym_mem: string -> int -> int -> unit
+    method log_sym_update: int -> int -> unit
+    method get_symbolic_string_id: int
   end
 end

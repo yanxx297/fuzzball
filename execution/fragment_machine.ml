@@ -506,8 +506,9 @@ class virtual fragment_machine = object
 
   method virtual make_sink_region : string -> int64 -> unit
 
-  method virtual add_sym_mem: int64 -> int64 -> unit
-  method virtual log_sym_update: int64 -> int64 -> unit
+  method virtual add_sym_mem: string -> int -> int -> unit
+  method virtual log_sym_update: int -> int -> unit
+  method virtual get_symbolic_string_id: int 
 end
 
 module FragmentMachineFunctor =
@@ -2469,6 +2470,8 @@ struct
 
     val mutable symbolic_string_id = 0
 
+    method get_symbolic_string_id = symbolic_string_id
+
     method make_symbolic_region base len =
       let varname = "input" ^ (string_of_int symbolic_string_id) in
 	symbolic_string_id <- symbolic_string_id + 1;
@@ -2762,8 +2765,8 @@ struct
     method finish_path = false
 
     method after_exploration = ()
-    method log_sym_update addr len = ()
-    method add_sym_mem base len = ()
+    method log_sym_update base len = ()
+    method add_sym_mem varname base len = () 
     method make_x86_segtables_symbolic = ()
     method store_word_special_region (r:register_name) (i1:int64) (i2:int64)
       : unit =
