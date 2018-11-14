@@ -299,7 +299,7 @@ expr:
 | CAST LPAREN expr RPAREN ID  COLON typ  
     { Cast(casttype_of_string $5, $7, $3) }	  
 | expr QUESTION expr COLON expr
-                     { $3 }
+                     { Ite($1, $3, $5) }
 
 constexp:
 | TRUE               { Vine.exp_true } 
