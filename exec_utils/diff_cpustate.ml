@@ -16,6 +16,32 @@ let read_lines_file fname =
       | End_of_file ->
 	  List.rev !l
 
+(* Add surfix _id to a Vine var if it is a temp var*)
+let rename_var v id = 
+  let (i, s, typ) = v in
+    if s.[0] = 't' then
+      (Printf.printf "Rename %s, id = %d\n" s i;
+      (i, (s^Printf.sprintf "_%d" id), typ))
+    else v
+
+(* Add surfix _id to the end of each temp var*)
+let rename_temps expr id =
+   let rec loop e = 
+    match e with
+      | V.BinOp(op, e1, e2) -> V.BinOp(op, loop e1, loop e2)
+      | V.FBinOp(op, rm, e1, e2) -> V.FBinOp(op, rm, loop e1, loop e2)
+      | V.UnOp(op, e1) -> V.UnOp(op, loop e1)
+      | V.FUnOp(op, rm, e1) -> V.FUnOp(op, rm, loop e1)
+      | V.Lval(V.Temp(var)) -> V.Lval(V.Temp(rename_var var id)) 
+      | V.Lval(V.Mem(var, e1, typ)) -> V.Lval(V.Mem(var, loop e1, typ))
+      | V.Cast(ctyp, typ, e1) -> V.Cast(ctyp, typ, loop e1)
+      | V.FCast(ctyp, rm, typ, e1) -> V.FCast(ctyp, rm, typ, loop e1)
+      | V.Ite(cond, e1, e2) -> V.Ite(loop cond, loop e1, loop e2)
+      | V.Let(_, _, _) -> failwith "Unexpected exp type on left side of the formula"
+      | V.Constant(_)| V.Name(_)| V.Unknown(_) -> e
+  in
+    loop expr
+
 let main argv =
   let inputs = ref [] in
     Arg.parse
@@ -36,12 +62,14 @@ let main argv =
      Temporary vars: rename and store in dl; also store connections between variables and its content (exp) in qe_decls
      Symbolic inputs: store in dl with the original name
      Symbolic outputs: store in outputs with the original name
+     NOTE: dl is for parsing, while qe_decls is for query; temps are renamed only in the later
      *)
     let qe = Options_solver.construct_solver "" in
     let dl = ref [] in
     let qe_decls = ref [] in
     let outputs = ref [] in
     let parse_file id fname = 
+      Printf.printf "Parse the %d-th file\n" id;
       let vars = Hashtbl.create 100 in
       let lines = read_lines_file fname in
         List.iteri (fun idx line ->
@@ -57,9 +85,10 @@ let main argv =
                             let varname = List.nth str 0 in
                             let typ = V.type_of_string (String.trim (List.nth str 1)) in
                             let t = V.newvar varname typ in
-                              let decl = QE.TempVar(t, (Vine_parser.parse_exp_from_string !dl expr_str)) in 
-                                qe_decls := !qe_decls @ [decl];
-                                dl := t::!dl;
+                            let expr = Vine_parser.parse_exp_from_string !dl expr_str in
+                            let decl = QE.TempVar((rename_var t id), (rename_temps expr id)) in 
+                              qe_decls := !qe_decls @ [decl];
+                              dl := t::!dl;
                          )
                        else if String.sub var 0 3 = "in_" then
                          (let input = V.newvar var V.REG_8 in
@@ -67,10 +96,12 @@ let main argv =
                             dl := input ::!dl
                          )
                        else if String.sub var 0 4 = "out_" then
-                            (Hashtbl.replace vars var (Vine_parser.parse_exp_from_string !dl expr_str); 
+                         (let expr = Vine_parser.parse_exp_from_string !dl expr_str in
+                            Hashtbl.replace vars var (rename_temps expr id); 
                          )
         ) lines;
-        outputs := vars::!outputs
+        outputs := vars::!outputs;
+        dl := []
     in
       assert (List.length !inputs = 2);
       List.iteri (fun id fname ->
@@ -81,6 +112,11 @@ let main argv =
         let unsat = ref "" in
           qe#start_query;
           List.iter (fun decl ->
+                       (match decl with
+                          | QE.TempVar(v, _) -> 
+                              (let (i, s, _) = v in 
+                                 Printf.printf "Add %s(%d) to qe_decl\n" (V.var_to_string v) i) 
+                          | _ -> ());
                        qe#add_decl decl
           ) !qe_decls;
           Hashtbl.iter (fun varname exp1 ->
