@@ -25,4 +25,5 @@ missing
 /compile
 .z3-trace
 fuzzball-tmp-*
+fuzzball-solver-log-*
 *.annot
