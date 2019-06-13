@@ -15,6 +15,7 @@ let opt_initial_edi = ref None
 let opt_initial_esp = ref None
 let opt_initial_ebp = ref None
 let opt_initial_eflagsrest = ref None
+let opt_initial_gdtr = ref None
 let opt_store_bytes = ref []
 let opt_store_shorts = ref []
 let opt_store_words = ref []
@@ -148,6 +149,9 @@ let concrete_state_cmdline_opts =
     ("-initial-eflagsrest", Arg.String
        (fun s -> opt_initial_eflagsrest := Some(Int64.of_string s)),
      "word Concrete value for %eflags, less [CPAZSO]F");
+    ("-initial-gdtr", Arg.String
+       (fun s -> opt_initial_gdtr := Some(Int64.of_string s)),
+     "word Concrete initial value for %gdt register");
     ("-store-byte", Arg.String
        (add_delimited_pair opt_store_bytes '='),
      "addr=val Set the byte at address to a concrete value");
@@ -745,6 +749,11 @@ let apply_cmdline_opts_late (fm : Fragment_machine.fragment_machine) =
   (match !opt_initial_eflagsrest with
      | Some v -> fm#set_word_var Fragment_machine.EFLAGSREST v
      | None -> ());
+  (match (!opt_initial_gdtr, !opt_arch) with
+     | (Some v, X86) -> fm#set_word_var Fragment_machine.R_GDT v
+     | (Some v, X64) -> failwith "%gdtr in X64 not suppported currently"
+     | (Some v, ARM) -> failwith "ARM has no %gdtr"
+     | (None, _) -> ());
   List.iter (fun (addr,v) -> fm#store_byte_conc addr 
 	       (Int64.to_int v)) !opt_store_bytes;
   List.iter (fun (addr,v) -> fm#store_short_conc addr
