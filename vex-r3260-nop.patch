@@ -1,0 +1,251 @@
+diff -crB vex-r3260/priv/guest_x86_toIR.c vex-r3260-2/priv/guest_x86_toIR.c
+*** vex-r3260/priv/guest_x86_toIR.c	2019-07-20 15:01:36.865736429 +0800
+--- vex-r3260-2/priv/guest_x86_toIR.c	2019-07-20 01:04:29.012114078 +0800
+***************
+*** 184,198 ****
+  #include "guest_generic_x87.h"
+  #include "guest_x86_defs.h"
+  
+- #include <setjmp.h>
+- 
+- /* Turn vpanic()s, which can be triggered by invalid instruction
+-    encodings, into well-behaved decode failures. */
+- static jmp_buf diswrk_jmp;
+- #undef vassert
+- #define vassert(x) if(!(x)) longjmp(diswrk_jmp, 1)
+- #define vpanic(x) longjmp(diswrk_jmp, 1)
+- 
+  
+  /*------------------------------------------------------------*/
+  /*--- Globals                                              ---*/
+--- 184,189 ----
+***************
+*** 1267,1280 ****
+     return grp5_names[opc_aux];
+  }
+  
+- static HChar* nameGrp6 ( Int opc_aux )
+- {
+-    static HChar* grp6_names[8] 
+-      = { "sldt", "str", "lldt", "ltr", "verr", "verw", "???", "???" };
+-    if (opc_aux < 0 || opc_aux > 7) vpanic("nameGrp6(x86)");
+-    return grp6_names[opc_aux];
+- }
+- 
+  static const HChar* nameGrp8 ( Int opc_aux )
+  {
+     static const HChar* grp8_names[8] 
+--- 1258,1263 ----
+***************
+*** 1422,1428 ****
+  {
+     switch (sorb) {
+        case 0:    return ""; /* no override */
+-       case 0x2E: return "%cs";
+        case 0x3E: return "%ds";
+        case 0x26: return "%es:";
+        case 0x64: return "%fs:";
+--- 1405,1410 ----
+***************
+*** 1447,1453 ****
+        return virtual;
+  
+     switch (sorb) {
+-       case 0x2E: sreg = R_CS; break;
+        case 0x3E: sreg = R_DS; break;
+        case 0x26: sreg = R_ES; break;
+        case 0x64: sreg = R_FS; break;
+--- 1429,1434 ----
+***************
+*** 3178,3216 ****
+     return delta;
+  }
+  
+- /* Group 6 extended opcodes. */
+- static
+- UInt dis_Grp6 ( UChar sorb, Int delta, Bool* decode_OK )
+- {
+-    Int   alen;
+-    UChar modrm;
+-    HChar dis_buf[50];
+- 
+-    *decode_OK = True;
+- 
+-    modrm = getIByte(delta);
+-    if (epartIsReg(modrm)) {
+-       /* register destination: unhandled */
+-       *decode_OK = False;
+-       return delta;
+-    } else {
+-       IRTemp addr = disAMode ( &alen, sorb, delta, dis_buf );
+-       switch (gregOfRM(modrm)) {
+-          case 0: /* SLDT: treat as no-op */
+-             break;
+-          case 1: /* STR: treat as no-op */
+-             break;
+-          default: 
+- 	    /* LLDT, LTR, VERR, VERW: unhandled */
+- 	    (void)addr;
+-             *decode_OK = False;
+-             return delta;
+-       }
+-       delta += alen;
+-       DIP("%sb %s\n", nameGrp6(gregOfRM(modrm)), dis_buf);
+-    }
+-    return delta;
+- }
+  
+  /*------------------------------------------------------------*/
+  /*--- Disassembling string ops (including REP prefixes)    ---*/
+--- 3159,3164 ----
+***************
+*** 8180,8188 ****
+     vassert(guest_EIP_bbstart + delta == guest_EIP_curr_instr);
+     DIP("\t0x%x:  ", guest_EIP_bbstart+delta);
+  
+-    if (setjmp(diswrk_jmp) != 0)
+-      goto decode_failure;
+- 
+     /* Spot "Special" instructions (see comment at top of file). */
+     {
+        const UChar* code = guest_code + delta;
+--- 8128,8133 ----
+***************
+*** 8331,8339 ****
+                  || (op1 == 0x0F && op2 >= 0x80 && op2 <= 0x8F)) {
+                 if (0) vex_printf("vex x86->IR: ignoring branch hint\n");
+              } else {
+! 		/* Pass any other CS overrides through (though we may not
+! 		   handle them reliably) */
+! 		sorb = getIByte(delta); delta++; 
+              }
+              break;
+           }
+--- 8276,8283 ----
+                  || (op1 == 0x0F && op2 >= 0x80 && op2 <= 0x8F)) {
+                 if (0) vex_printf("vex x86->IR: ignoring branch hint\n");
+              } else {
+!                /* All other CS override cases are not handled */
+!                goto decode_failure;
+              }
+              break;
+           }
+***************
+*** 13454,13464 ****
+        case 0xD2:
+           jump_kind = Ijk_Sys_int210;
+           break;
+-       case 0x2D:
+- 	 /* Windows Debug Service Handler, treat similar to INT 3 */
+- 	 jmp_lit(&dres, Ijk_SigTRAP, ((Addr32)guest_EIP_bbstart)+delta);
+- 	 vassert(dres.whatNext == Dis_StopHere);
+- 	 DIP("int $0x2d\n");
+        default:
+           /* none of the above */
+           goto decode_failure;
+--- 13398,13403 ----
+***************
+*** 14116,14127 ****
+        /* Calculate OSZACP, and patch in fixed fields as per
+           Intel docs. 
+           - bit 1 is always 1
+!          - not bit 9 (Interrupt Enable, should always be 1 in user mode?)
+        */
+        t2 = newTemp(Ity_I32);
+        assign( t2, binop(Iop_Or32, 
+                          mk_x86g_calculate_eflags_all(), 
+!                         mkU32( (1<<1) ) ));
+  
+        /* Patch in the D flag.  This can simply be a copy of bit 10 of
+           baseBlock[OFFB_DFLAG]. */
+--- 14055,14066 ----
+        /* Calculate OSZACP, and patch in fixed fields as per
+           Intel docs. 
+           - bit 1 is always 1
+!          - bit 9 is Interrupt Enable (should always be 1 in user mode?)
+        */
+        t2 = newTemp(Ity_I32);
+        assign( t2, binop(Iop_Or32, 
+                          mk_x86g_calculate_eflags_all(), 
+!                         mkU32( (1<<1)|(1<<9) ) ));
+  
+        /* Patch in the D flag.  This can simply be a copy of bit 10 of
+           baseBlock[OFFB_DFLAG]. */
+***************
+*** 14241,14258 ****
+        dis_string_op( dis_SCAS, ( opc == 0xAE ? 1 : sz ), "scas", sorb );
+        break;
+  
+-    case 0xF4: /* HLT, treat like a trap */
+-       jmp_lit(&dres, Ijk_SigTRAP, ((Addr32)guest_EIP_bbstart)+delta);
+-       vassert(dres.whatNext == Dis_StopHere);
+-       DIP("hlt\n");
+-       break;
+-    /* Some basic kernel instructions, treat like NOPs */
+-    case 0xFA: /* CLI */
+-       DIP("cli\n");
+-       break;
+-    case 0xFB: /* STI */
+-       DIP("sti\n");
+-       break;
+  
+     case 0xFC: /* CLD */
+        stmt( IRStmt_Put( OFFB_DFLAG, mkU32(1)) );
+--- 14180,14185 ----
+***************
+*** 15436,15489 ****
+  
+        /* =-=-=-=-=-=-=-=-=- unimp2 =-=-=-=-=-=-=-=-=-=-= */
+  
+-       case 0x0B: /* UD2 */
+- 	 /* Pretend this is like int3 */
+- 	 jmp_lit(&dres, Ijk_SigTRAP, ((Addr32)guest_EIP_bbstart)+delta);
+- 	 vassert(dres.whatNext == Dis_StopHere);
+- 	 DIP("ud2\n");
+- 	 break;
+- 
+-       case 0xFF: /* UD0 */
+- 	 /* Same as UD2 */
+- 	 jmp_lit(&dres, Ijk_SigTRAP, ((Addr32)guest_EIP_bbstart)+delta);
+- 	 vassert(dres.whatNext == Dis_StopHere);
+- 	 DIP("ud0\n");
+- 	 break;
+- 
+-       /* Move to or from control registers, treat like NOP */
+- 
+-       case 0x20: /* move from debug register */
+- 	 delta++; /* skip modrm byte */
+- 	 DIP("mov %%cr?,%%reg\n");
+- 	 break;
+- 		     
+-       case 0x22: /* move to debug register */
+- 	 delta++; /* skip modrm byte */
+- 	 DIP("mov %%reg,%%cr?\n");
+- 	 break;
+- 
+-       /* Move to or from debug registers, treat like NOP */
+- 
+-       case 0x21: /* move from debug register */
+- 	 delta++; /* skip modrm byte */
+- 	 DIP("mov %%db?,%%reg\n");
+- 	 break;
+- 		     
+-       case 0x23: /* move to debug register */
+- 	 delta++; /* skip modrm byte */
+- 	 DIP("mov %%reg,%%db?\n");
+- 	 break;
+- 
+-       /* ------------------------ (Grp6 extensions) ---------- */
+- 	 
+-       case 0x00: { /* Grp6 */
+- 	 Bool decode_OK = True;
+- 	 delta = dis_Grp6 ( sorb, delta, &decode_OK );
+- 	 if (!decode_OK)
+- 	    goto decode_failure;
+- 	 break;
+-       }
+- 
+        default:
+           goto decode_failure;
+     } /* switch (opc) for the 2-byte opcodes */
+--- 15363,15368 ----
