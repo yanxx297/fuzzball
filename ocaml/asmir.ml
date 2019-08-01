@@ -461,6 +461,7 @@ let x86_regs : decl list =
   ("R_CC_NDEP", REG_32);
 
   (* more status flags *)
+  ("R_IFLAG", REG_32);
   ("R_DFLAG", REG_32);
   ("R_IDFLAG", REG_32);
   ("R_ACFLAG", REG_32);

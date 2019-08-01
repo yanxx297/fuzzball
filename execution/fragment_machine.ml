@@ -75,7 +75,7 @@ type register_name =
   | R_CF | R_ZF
   (* Common to x86 and x64: *)
   | R_PF | R_AF | R_SF | R_OF
-  | R_DFLAG | R_IDFLAG | R_ACFLAG
+  | R_IFLAG | R_DFLAG | R_IDFLAG | R_ACFLAG
   | R_CS | R_DS| R_ES | R_FS | R_GS | R_SS
   | R_FTOP | R_FPROUND | R_FC3210 | R_SSEROUND 
   (* x87 FP, currently only supported on x86: *)
@@ -139,7 +139,7 @@ let reg_to_regstr reg = match reg with
   | R_AF -> "R_AF"| R_ZF -> "R_ZF" | R_SF -> "R_SF" | R_OF -> "R_OF"
   | R_CC_OP -> "R_CC_OP" | R_CC_DEP1 -> "R_CC_DEP1"
   | R_CC_DEP2 -> "R_CC_DEP2" | R_CC_NDEP -> "R_CC_NDEP"
-  | R_DFLAG -> "R_DFLAG" | R_IDFLAG -> "R_IDFLAG" | R_ACFLAG -> "R_ACFLAG"
+  | R_IFLAG -> "R_IFLAG" | R_DFLAG -> "R_DFLAG" | R_IDFLAG -> "R_IDFLAG" | R_ACFLAG -> "R_ACFLAG"
   | R_EMWARN -> "R_EMWARN" | R_EMNOTE -> "R_EMNOTE"
   | R_LDT -> "R_LDT" | R_GDT -> "R_GDT" | R_CS -> "R_CS" | R_DS -> "R_DS"
   | R_ES -> "R_ES" | R_FS -> "R_FS" | R_GS -> "R_GS"| R_SS -> "R_SS"
@@ -229,7 +229,7 @@ let regstr_to_reg s = match s with
   | "R_AF" -> R_AF| "R_ZF" -> R_ZF | "R_SF" -> R_SF | "R_OF" -> R_OF
   | "R_CC_OP" -> R_CC_OP | "R_CC_DEP1" -> R_CC_DEP1
   | "R_CC_DEP2" -> R_CC_DEP2 | "R_CC_NDEP" -> R_CC_NDEP
-  | "R_DFLAG" -> R_DFLAG | "R_IDFLAG" -> R_IDFLAG | "R_ACFLAG" -> R_ACFLAG
+  | "R_IFLAG" -> R_IFLAG | "R_DFLAG" -> R_DFLAG | "R_IDFLAG" -> R_IDFLAG | "R_ACFLAG" -> R_ACFLAG
   | "R_EMWARN" -> R_EMWARN | "R_EMNOTE" -> R_EMNOTE
   | "R_LDT" -> R_LDT | "R_GDT" -> R_GDT | "R_CS" -> R_CS | "R_DS" -> R_DS
   | "R_ES" -> R_ES | "R_FS" -> R_FS | "R_GS" -> R_GS| "R_SS" -> R_SS
@@ -829,6 +829,7 @@ struct
 	reg EFLAGSREST (D.from_concrete_32 0L);
 	reg R_LDT (D.from_concrete_32 0x00000000L);
 	reg R_GDT (D.from_concrete_32 0x00000000L);
+	reg R_IFLAG (D.from_concrete_32 0L);
 	reg R_DFLAG (D.from_concrete_32 1L);
 	reg R_IDFLAG (D.from_concrete_32 0L);
 	reg R_ACFLAG (D.from_concrete_32 0L);
@@ -1064,6 +1065,7 @@ struct
 	reg R_GS (D.from_concrete_16 0x63);
 	reg R_GDT (D.from_concrete_32 0x60000000L);
 	reg R_LDT (D.from_concrete_32 0x61000000L);
+	reg R_IFLAG (D.from_concrete_32 0L);
 	reg R_DFLAG (D.from_concrete_32 1L);
 	reg R_ACFLAG (D.from_concrete_32 0L);
 	reg R_IDFLAG (D.from_concrete_32 0L);
@@ -1411,6 +1413,7 @@ struct
       self#print_reg1 "ZF" R_ZF;
       self#print_reg1 "SF" R_SF;
       self#print_reg1 "OF" R_OF;
+      self#print_reg32 "EFLAGS" EFLAGSREST;
       self#print_reg128 "XMM0" R_XMM0H R_XMM0L;
       self#print_reg128 "XMM1" R_XMM1H R_XMM1L;
       self#print_reg128 "XMM2" R_XMM2H R_XMM2L;

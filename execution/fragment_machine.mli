@@ -17,7 +17,7 @@ type register_name =
   | R_CF | R_ZF
   (* Common to x86 and x64: *)
   | R_PF | R_AF | R_SF | R_OF
-  | R_DFLAG | R_IDFLAG | R_ACFLAG
+  | R_IFLAG | R_DFLAG | R_IDFLAG | R_ACFLAG
   | R_CS | R_DS| R_ES | R_FS | R_GS | R_SS
   | R_FTOP | R_FPROUND | R_FC3210 | R_SSEROUND 
   (* x87 FP, currently only supported on x86: *)

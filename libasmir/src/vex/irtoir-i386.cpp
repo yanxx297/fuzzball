@@ -50,6 +50,7 @@
 #define OFFB_FPTAG5    offsetof(VexGuestX86State,guest_FPTAG[5])
 #define OFFB_FPTAG6    offsetof(VexGuestX86State,guest_FPTAG[6])
 #define OFFB_FPTAG7    offsetof(VexGuestX86State,guest_FPTAG[7])
+#define OFFB_IFLAG     offsetof(VexGuestX86State,guest_IFLAG)
 #define OFFB_DFLAG     offsetof(VexGuestX86State,guest_DFLAG)
 #define OFFB_IDFLAG    offsetof(VexGuestX86State,guest_IDFLAG)
 #define OFFB_ACFLAG    offsetof(VexGuestX86State,guest_ACFLAG)
@@ -243,6 +244,7 @@ vector<VarDecl *> i386_get_reg_decls()
   ret.push_back(new VarDecl("R_CC_NDEP", r32));  
 
   // other flags
+  ret.push_back(new VarDecl("R_IFLAG", r32));
   ret.push_back(new VarDecl("R_DFLAG", r32));
   ret.push_back(new VarDecl("R_IDFLAG", r32));
   ret.push_back(new VarDecl("R_ACFLAG", r32));
@@ -337,6 +339,7 @@ static string reg_offset_to_name( int offset, bool *is_good )
         case OFFB_CC_DEP2:  name = "CC_DEP2";   good=true; break;
         case OFFB_CC_NDEP:  name = "CC_NDEP";   good=true; break;
 
+        case OFFB_IFLAG:    name = "IFLAG";     good=true; break;
         case OFFB_DFLAG:    name = "DFLAG";     good=true; break;
         case OFFB_IDFLAG:   name = "IDFLAG";    good=true; break;
         case OFFB_ACFLAG:   name = "ACFLAG";    good=true; break;
