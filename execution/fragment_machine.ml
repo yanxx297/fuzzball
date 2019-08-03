@@ -1413,7 +1413,7 @@ struct
       self#print_reg1 "ZF" R_ZF;
       self#print_reg1 "SF" R_SF;
       self#print_reg1 "OF" R_OF;
-      self#print_reg32 "EFLAGS" EFLAGSREST;
+      self#print_reg32 "R_IFLAG" R_IFLAG;
       self#print_reg128 "XMM0" R_XMM0H R_XMM0L;
       self#print_reg128 "XMM1" R_XMM1H R_XMM1L;
       self#print_reg128 "XMM2" R_XMM2H R_XMM2L;
