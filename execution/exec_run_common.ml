@@ -145,6 +145,8 @@ let noop_known_unknowns (dl, sl) =
 	    V.Comment("Unknown: storeF80")
 	| V.ExpStmt(V.Unknown("Unknown: fxsave")) ->
 	    V.Comment("Unknown: fxsave")
+	| V.ExpStmt(V.Unknown("Unknown: fxrstor")) ->
+	    V.Comment("Unknown: fxrstor")
 	| s -> s) sl)
 
 let trans_cache = Hashtbl.create 100001

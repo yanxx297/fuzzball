@@ -904,6 +904,9 @@ Stmt *i386_translate_dirty( IRStmt *stmt, IRSB *irbb, vector<Stmt *> *irout )
     else if (func == "x86g_dirtyhelper_FXSAVE") {
         result = new ExpStmt(new Unknown("Unknown: fxsave"));
     }
+    else if (func == "x86g_dirtyhelper_FXRSTOR") {
+        result = new ExpStmt(new Unknown("Unknown: fxrstor"));
+    }
     else
     {
         result = new ExpStmt(new Unknown("Unknown: Dirty"));
