@@ -1344,13 +1344,14 @@ struct
       self#set_word_var R_ESP (Int64.of_int32 regs.Temu_state.esp);
       self#set_word_var R_EBP (Int64.of_int32 regs.Temu_state.ebp);
       self#set_word_var EFLAGSREST
-	(Int64.logand (Int64.of_int32 regs.Temu_state.eflags) 0xfffff72aL);
+	(Int64.logand (Int64.of_int32 regs.Temu_state.eflags) 0xfffff52aL);
       (let eflags_i = Int32.to_int regs.Temu_state.eflags in
 	 self#set_bit_var R_CF (eflags_i land 1);
 	 self#set_bit_var R_PF ((eflags_i lsr 2) land 1);
 	 self#set_bit_var R_AF ((eflags_i lsr 4) land 1);
 	 self#set_bit_var R_ZF ((eflags_i lsr 6) land 1);
 	 self#set_bit_var R_SF ((eflags_i lsr 7) land 1);
+	 self#set_word_var R_IFLAG (Int64.of_int ((eflags_i lsr 9) land 1));
 	 self#set_bit_var R_OF ((eflags_i lsr 11) land 1));
       self#set_short_var R_CS (Int32.to_int regs.Temu_state.xcs);
       self#set_short_var R_DS (Int32.to_int regs.Temu_state.xds);
