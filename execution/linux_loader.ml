@@ -291,6 +291,13 @@ let build_startup_state (fm : Fragment_machine.fragment_machine) eh load_base ld
     fm#store_cstr !esp 0L s;
     !esp
   in
+  let _push_cstr_padded s =
+    let real_len = (String.length s) + 1 in
+    let padded_len = real_len + (-real_len land 31) in
+      esp := Int64.sub !esp (Int64.of_int padded_len);
+      fm#store_cstr !esp 0L s;
+      !esp
+  in
   let push_word i =
     match !opt_arch with
       | (X86|ARM) ->
@@ -410,7 +417,7 @@ let check_elf_arch e_machine do_setup =
     match e_machine with
       | 0x03 -> ("x86", X86, false) (* EM_386 *)
       | 0x28 -> ("arm", ARM, false) (* EM_ARM = 40 *)
-      | 0x3e -> ("x64", X64, false) (* EM_ARM = 62 *)
+      | 0x3e -> ("x64", X64, false) (* EM_X64 = 62 *)
       | _    -> ("",    X86, true)
   in
     if weird then
@@ -422,6 +429,26 @@ let check_elf_arch e_machine do_setup =
 	 expected_str;
        if do_setup then
 	 failwith "Refusing to continue with wrong architecture";)
+
+let detect_elf_arch fname =
+  let ic = open_in (chroot fname) in
+  let eh = read_elf_header ic in
+  let arch =
+    match eh.machine with
+      | 0x03 -> Some X86    (* EM_386 *)
+      | 0x28 -> Some ARM    (* EM_ARM = 40 *)
+      | 0x3e -> Some X64    (* EM_X64 = 62 *)
+      | _    -> None
+  in
+    close_in ic;
+    if !opt_trace_setup then
+      (Printf.printf "Attempting to detect CPU architecture from %s\n" fname;
+       match arch with
+	 | None -> Printf.printf "Failed to detect CPU architecture\n"
+	 | Some arch ->
+	     Printf.printf "Detected architecuture as %s\n"
+	       (string_of_execution_arch arch));
+    arch
 
 (* Despite the name, this function is currently used for statically
    linked binaries as well as dynamically linked binaries and PIE
@@ -468,7 +495,7 @@ let load_dynamic_program (fm : fragment_machine) fname load_base
 	    let interp = IO.really_nread i ((Int64.to_int phr.filesz) - 1) in
 	      entry_point := load_ldso fm interp ldso_base;
 	      load_segment fm ic phr extra_vaddr true)
-	 else if phr.memsz != 0L then
+	 else if phr.memsz <> 0L then
 	   load_segment fm ic phr extra_vaddr true;
 	 List.iter
 	   (fun (base, size) ->

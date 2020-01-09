@@ -453,12 +453,12 @@ object(self)
     (if (flags land 0x3) = 0        then [Unix.O_RDONLY]   else []) @
       (if (flags land 0x3)= 1       then [Unix.O_WRONLY]   else []) @
       (if (flags land 0x3) = 2      then [Unix.O_RDWR]     else []) @
-      (if (flags land 0o4000) != 0  then [Unix.O_NONBLOCK] else []) @
-      (if (flags land 0o2000) != 0  then [Unix.O_APPEND]   else []) @
-      (if (flags land 0o100) != 0   then [Unix.O_CREAT]    else []) @
-      (if (flags land 0o1000) != 0  then [Unix.O_TRUNC]    else []) @
-      (if (flags land 0o200) != 0   then [Unix.O_EXCL]     else []) @
-      (if (flags land 0o10000) != 0 then [Unix.O_SYNC]     else [])
+      (if (flags land 0o4000) <> 0  then [Unix.O_NONBLOCK] else []) @
+      (if (flags land 0o2000) <> 0  then [Unix.O_APPEND]   else []) @
+      (if (flags land 0o100) <> 0   then [Unix.O_CREAT]    else []) @
+      (if (flags land 0o1000) <> 0  then [Unix.O_TRUNC]    else []) @
+      (if (flags land 0o200) <> 0   then [Unix.O_EXCL]     else []) @
+      (if (flags land 0o10000) <> 0 then [Unix.O_SYNC]     else [])
 
   method private write_oc_statbuf_as_stat addr oc_buf =
     let dev = Int64.of_int oc_buf.Unix.st_dev and
@@ -795,9 +795,9 @@ object(self)
   method sys_access path mode =
     let oc_mode =
       (if   (mode land 0x7)= 0 then [Unix.F_OK] else []) @
-	(if (mode land 0x1)!=0 then [Unix.X_OK] else []) @
-	(if (mode land 0x2)!=0 then [Unix.W_OK] else []) @
-	(if (mode land 0x4)!=0 then [Unix.R_OK] else []) 
+	(if (mode land 0x1)<>0 then [Unix.X_OK] else []) @
+	(if (mode land 0x2)<>0 then [Unix.W_OK] else []) @
+	(if (mode land 0x4)<>0 then [Unix.R_OK] else [])
     in
       try
 	Unix.access (chroot path) oc_mode;
@@ -1011,13 +1011,15 @@ object(self)
 	      Unix.clear_nonblock real_fd;
 	  put_return 0L (* success *)
       | 6 (* F_SETLK *)
-      | 7 (* F_SETLKW *) ->
+      | 7 (* F_SETLKW *)
+      | 13 (* F_SETLK64 *)
+      | 14 (* F_SETLKW64 *) ->
 	  (* Ignore locks for the moment. OCaml has only lockf, so
 	     emulation would be a bit complex. *)
 	  ignore(fd);
 	  ignore(arg);
 	  put_return 0L (* success *)
-      | _ -> failwith "Unhandled cmd in fcntl64"
+      | _ -> failwith "Unhandled cmd in fcntl{,64}"
 
   method sys_fcntl fd cmd arg =
     self#fcntl_common fd cmd arg
@@ -1661,6 +1663,12 @@ object(self)
   method sys_mprotect addr len prot =
     (* treat as no-op *)
     put_return 0L;
+
+  method private sys_mremap old_addr old_size new_size flags new_addr =
+    (* Unsupported *)
+    ignore(old_addr); ignore(old_size); ignore(new_size);
+    ignore(flags); ignore(new_size);
+    self#put_errno Unix.ENOSYS
 
   method sys_munmap addr len =
     (* treat as no-op *)
@@ -2720,6 +2728,11 @@ object(self)
     self#write_fake_statfs64buf struct_buf;
     put_return 0L (* success *)
 
+  method private sys_fstatfs64 fd buf_len struct_buf =
+    assert(buf_len = 84 || buf_len = 88); (* Same layout, different padding *)
+    self#write_fake_statfs64buf struct_buf;
+    put_return 0L (* success *)
+
   method sys_fsync fd =
     ignore(fd);
     put_return 0L (* success *)
@@ -2736,7 +2749,7 @@ object(self)
 
   method sys_time addr =
     let time = Int64.of_float (Unix.time ()) in
-      if addr != 0L then
+      if addr <> 0L then
 	store_word addr 0 time else ();
       put_return time
 
@@ -2812,7 +2825,7 @@ object(self)
       put_return 0L (* success *)
 
   method sys_alarm sec =
-    if sec != 0 then
+    if sec <> 0 then
       raise (Unix.Unix_error
                (Unix.EOPNOTSUPP, 
                "Nonzero argument to alarm(2) not supported", ""))
@@ -4063,10 +4076,18 @@ object(self)
 		 Printf.eprintf "nanosleep(0x%08Lx, 0x%08Lx)"
 		   req_addr rem_addr;
 	       self#sys_nanosleep req_addr rem_addr
-	 | ((X86|ARM), 163) -> (* mremap *)
-	     uh "Unhandled Linux system call mremap (163)"
+	 | ((X86|ARM), 163) (* mremap *)
 	 | (X64, 25) -> (* mremap *)
-	     uh "Unhandled Linux/x64 system call mremap (25)"
+	     let (arg1, arg2, arg3, arg4, arg5) = read_5_regs () in
+	     let old_addr = arg1 and
+		 old_size = arg2 and
+		 new_size = arg3 and
+		 flags = Int64.to_int arg4 and
+		 new_addr = arg5 in
+	       if !opt_trace_syscalls then
+		 Printf.eprintf "mremap(0x%08Lx, %Ld, %Ld, %d, 0x%08Lx)"
+		   old_addr old_size new_size flags new_addr;
+	       self#sys_mremap old_addr old_size new_size flags new_addr;
 	 | ((X86|ARM), 164) -> (* setresuid *)
 	     uh "Unhandled Linux system call setresuid (164)"
 	 | ((X86|ARM), 165) -> (* getresuid *)
@@ -4681,7 +4702,14 @@ object(self)
 	       self#sys_statfs64 path buf_len struct_buf
 	 | (ARM, 267)    (* fstatfs64 *)
 	 | (X86, 269) -> (* fstatfs64 *)
-	     uh "Unhandled Linux system call fstatfs64"
+	     let (arg1, arg2, arg3) = read_3_regs () in
+	     let fd = Int64.to_int arg1 and
+		 buf_len = Int64.to_int arg2 and
+		 struct_buf = arg3 in
+	       if !opt_trace_syscalls then
+		 Printf.eprintf "fstatfs64(%d, %d, 0x%08Lx)"
+		   fd buf_len struct_buf;
+	       self#sys_fstatfs64 fd buf_len struct_buf
 	 | (ARM, 268)    (* tgkill *)
 	 | (X64, 234)    (* tgkill *)
 	 | (X86, 270) -> (* tgkill *)

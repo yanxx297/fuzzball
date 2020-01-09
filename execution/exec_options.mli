@@ -35,6 +35,7 @@ val random_notice_of_string : string -> random_notice
 type execution_arch = X86 | X64 | ARM
 
 val execution_arch_of_string : string -> execution_arch
+val string_of_execution_arch : execution_arch -> string
 
 val asmir_arch_of_execution_arch : execution_arch -> Asmir.arch
 val libasmir_arch_of_execution_arch : execution_arch ->
@@ -104,6 +105,8 @@ val opt_trace_callstack : bool ref
 val opt_trace_sym_addrs : bool ref
 val opt_trace_sym_addr_details : bool ref
 val opt_trace_syscalls : bool ref
+val opt_turn_opt_off_range : (string * int64 * int64) list ref
+val opt_turn_opt_on_range : (string * int64 * int64) list ref
 val opt_trace_detailed_ranges : (int64 * int64) list ref
 val opt_extra_conditions : Vine.exp list ref
 val opt_tracepoints : (int64 * string * Vine.exp) list ref
@@ -191,6 +194,7 @@ val opt_disable_ce_cache : bool ref
 val opt_narrow_bitwidth_cutoff : int option ref
 val opt_t_expr_size : int ref
 val opt_sanity_checks : bool ref
+val opt_trace_simplify : bool ref
 
 val opt_symbolic_memory : bool ref
 val opt_zero_memory : bool ref
@@ -243,6 +247,8 @@ val add_delimited_num_escstr_pair :
 val add_delimited_str_num_pair :
   (string * int64) list ref -> char -> string -> unit
 val split_string_list : char -> string -> string list
+val add_delimited_triple :
+  (string * int64 * int64 ) list ref -> char -> string -> unit
 
 val opt_program_name : string option ref
 val get_program_name : unit -> string
