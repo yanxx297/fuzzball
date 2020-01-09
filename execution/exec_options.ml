@@ -46,6 +46,11 @@ let execution_arch_of_string s =
     | "arm" -> ARM
     | _ -> failwith ("Unrecognized architecture `" ^ s ^ "'")
 
+let string_of_execution_arch = function
+  | X86 -> "x86"
+  | X64 -> "x64"
+  | ARM -> "arm"
+
 let asmir_arch_of_execution_arch = function
   | X86 -> Asmir.arch_i386
   | X64 -> Asmir.arch_x64
@@ -120,6 +125,8 @@ let opt_trace_callstack = ref false
 let opt_trace_sym_addrs = ref false
 let opt_trace_sym_addr_details = ref false
 let opt_trace_syscalls = ref false
+let opt_turn_opt_off_range = ref []
+let opt_turn_opt_on_range = ref []
 let opt_trace_detailed_ranges = ref []
 let opt_extra_conditions = ref []
 let opt_tracepoints = ref []
@@ -207,6 +214,7 @@ let opt_disable_ce_cache = ref false
 let opt_narrow_bitwidth_cutoff = ref None
 let opt_t_expr_size = ref 10
 let opt_sanity_checks = ref false
+let opt_trace_simplify = ref false
 
 let opt_symbolic_memory = ref false
 let opt_zero_memory = ref false
@@ -228,6 +236,13 @@ let opt_progress_interval = ref None
 let opt_final_pc = ref false
 let opt_solve_final_pc = ref false
 let opt_skip_untainted = ref false
+
+(* We avoid making this an option type becaue there is a lot of code
+   that matches on it, and it should always be set to a paticular
+   architecture from quite early in the run. But the behavior when the
+   -arch option is ommitted is no longer to default to X86: instead we
+   try to detect the architecture from the headers of a supplied ELF
+   executable. *)
 let opt_arch = ref X86
 let opt_arch_string = ref None
 
@@ -320,6 +335,23 @@ let rec split_string_list delim s =
   else
     [s]
 
+let add_delimited_triple opt char s =
+  let rec loop arg_str =
+    try 
+      let (str1, str2) = split_string char arg_str in
+      [str1] @ (loop str2)
+    with Not_found -> [arg_str]
+  in
+  let list_str = loop s in
+  if (List.length list_str) <> 3 then
+    failwith
+      (Printf.sprintf
+	 "add_delimited_triple did not find 3 delimited values in option value: %s" s);
+  opt := (List.nth list_str 0, 
+   (Int64.of_string (List.nth list_str 1)), 
+   (Int64.of_string (List.nth list_str 2))) :: !opt
+
+      
 let opt_program_name = ref None
 
 let get_program_name () =
