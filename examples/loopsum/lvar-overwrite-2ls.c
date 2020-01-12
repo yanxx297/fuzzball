@@ -1,5 +1,7 @@
 // A toy example to show the benefit of our loopsum implementation based on 
 // online symbolic execution.
+//
+// In-loop branching example
 
 #include <stdio.h>
 #include <stdlib.h>
