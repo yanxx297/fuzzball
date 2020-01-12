@@ -463,77 +463,72 @@ class loop_record tail head g= object(self)
   (* EC = (D+dD+1)/dD if integer overflow not happen *)
   (* EC = (D-1)/dD + 1 if iof happens*)
   (* D is unsigned and dD should be positive *)
-  method private ec var check = 
+  method private ec var = 
     let (op, ty, d, dd) = var in
-      if check (V.BinOp(V.LT, V.BinOp(V.PLUS, d, dd), d)) then
-        V.BinOp(V.PLUS, V.BinOp(V.DIVIDE, V.BinOp(
-          V.MINUS, d, V.Constant(V.Int(ty, 1L))), dd), V.Constant(V.Int(ty, 1L)))
-      else
-        V.BinOp(V.DIVIDE, V.BinOp(V.MINUS, V.BinOp(V.PLUS, d, dd), V.Constant(V.Int(ty, 1L))), dd)
+      V.Ite(V.BinOp(V.LT, V.BinOp(V.PLUS, d, dd), d),
+            V.BinOp(V.PLUS, 
+                    V.BinOp(V.DIVIDE, 
+                            V.BinOp(V.MINUS, d, V.Constant(V.Int(ty, 1L))), 
+                            dd),
+                    V.Constant(V.Int(ty, 1L))),
+            V.BinOp(V.DIVIDE, 
+                    V.BinOp(V.MINUS, 
+                            V.BinOp(V.PLUS, d, dd), 
+                            V.Constant(V.Int(ty, 1L))), dd))
 
   (* Compute expected loop count from a certain guard*)
   (* D and dD should not be 0, otherwise current path never enter/exit the loop *)
-  method private compute_ec (_, op, ty, d0_e, slice, _, dd_opt, b, _) 
+  method private compute_ec (_, op, ty, d0_e, slice, _, dd, b, _) 
           check eval_cond simplify unwrap_temp run_slice =
     run_slice slice;
     let e = eval_cond d0_e in
     match (split_cond e b unwrap_temp) with
     | (Some lhs, Some rhs, _) ->
-        (let d = (match self#compute_distance op ty lhs rhs check simplify with
-                    | Some d -> 
-                        assert(check (V.BinOp(V.NEQ, V.Constant(V.Int(ty, 0L)), d))); d
-                    | None -> failwith "Cannot compute D")
-         in
-         let dd = (match dd_opt with
-                     | Some dd -> 
-                         assert(check (V.BinOp(V.NEQ, V.Constant(V.Int(ty, 0L)), dd))); dd
-                     | None -> failwith "Cannot compute Dd")
-         in
-         (* Check integer overflow by checking whether D and dD are both *)
-         (* positive/negative, and compute EC with modified D and dD accordingly*)
+        (* Check integer overflow by checking whether D and dD are both *)
+        (* positive/negative, and compute EC with modified D and dD accordingly*)
+        (let d = self#compute_distance op ty lhs rhs simplify in 
          let d_cond = V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), d) in
          let dd_cond = V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), dd) in
-         let res = 
+           assert(check (V.BinOp(V.NEQ, V.Constant(V.Int(ty, 0L)), d)));
+           assert(check (V.BinOp(V.NEQ, V.Constant(V.Int(ty, 0L)), dd)));
+           assert(dd !=  V.Unknown("No dD"));
            (match op with
               | V.SLE | V.SLT ->
-                  (match (check d_cond, check dd_cond) with
-                     | (true, false) -> self#ec (op, ty, d, V.UnOp(V.NEG, dd)) check 
-                     | (false, true) -> self#ec (op, ty, V.UnOp(V.NEG, d), dd) check
-                     | (true, true) -> 
-                         self#ec (op, ty, V.BinOp(V.PLUS, 
-                                                  V.BinOp(V.MINUS, 
-                                                          V.Constant(V.Int(ty, Int64.sub (min_signed ty) 1L)), lhs), 
-                                                  dd), dd) check
-                     | (false, false) -> 
-                         self#ec (op, ty, V.BinOp(V.MINUS, 
-                                                  V.BinOp(V.MINUS, 
-                                                          V.Constant(V.Int(ty, min_signed ty)), lhs), 
-                                                  dd), V.UnOp(V.NEG, dd)) check)
+                  (V.Ite(V.BinOp(V.BITAND, d_cond, V.UnOp(V.NOT, dd_cond)),
+                         self#ec (op, ty, d, V.UnOp(V.NEG, dd)),
+                         V.Ite(V.BinOp(V.BITAND, V.UnOp(V.NOT, d_cond), dd_cond),
+                               self#ec (op, ty, V.UnOp(V.NEG, d), dd),
+                               V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
+                                     self#ec (op, ty, 
+                                              V.BinOp(V.PLUS, 
+                                                      V.BinOp(V.MINUS, 
+                                                              V.Constant(V.Int(ty, Int64.sub (min_signed ty) 1L)), 
+                                                              lhs), dd), dd),
+                                     self#ec (op, ty, 
+                                              V.BinOp(V.MINUS, 
+                                                      V.BinOp(V.MINUS, 
+                                                              V.Constant(V.Int(ty, min_signed ty)), lhs), dd), 
+                                              V.UnOp(V.NEG, dd))))))
               | V.LE | V.LT ->
-                  (match (check d_cond, check dd_cond) with
-                     | (true, false) -> self#ec (op, ty, d, V.UnOp(V.NEG, dd)) check
-                     | (false, true) -> self#ec (op, ty, V.UnOp(V.NEG, d), dd) check
-                     | (true, true) -> 
-                         self#ec (op, ty, V.BinOp(V.PLUS, 
-                                                  V.BinOp(V.MINUS, 
-                                                          V.Constant(V.Int(ty, max_unsigned ty)), lhs), dd), dd) check
-                     | (false, false) -> self#ec (op, ty, V.BinOp(V.MINUS, lhs, dd), dd) check)
+                  (V.Ite(V.BinOp(V.BITAND, d_cond, V.UnOp(V.NOT, dd_cond)),
+                         self#ec (op, ty, d, V.UnOp(V.NEG, dd)),
+                         V.Ite(V.BinOp(V.BITAND, V.UnOp(V.NOT, d_cond), dd_cond),
+                               self#ec (op, ty, V.UnOp(V.NEG, d), dd),
+                               V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
+                                     self#ec (op, ty, V.BinOp(V.PLUS, 
+                                                              V.BinOp(V.MINUS, 
+                                                                      V.Constant(V.Int(ty, max_unsigned ty)), 
+                                                                      lhs), dd), dd),
+                                     self#ec (op, ty, V.BinOp(V.MINUS, lhs, dd), dd)))))
               | V.EQ ->
-                  (match (check d_cond, check dd_cond) with
-                     | (true, false) -> self#ec (op, ty, d, V.UnOp(V.NEG, dd)) check
-                     | (false, true) -> self#ec (op, ty, V.UnOp(V.NEG, d), dd) check
-                     | (true, true) ->
-                         self#ec (op, ty, V.BinOp(V.MINUS, rhs, lhs), dd) check
-                     | (false, false) -> self#ec (op, ty, d, V.UnOp(V.NEG, dd)) check
-                  )
-              | _ -> failwith "invalid guard operation")
-         in
-           (match (check d_cond, check dd_cond) with
-              | (true, false) -> (d_cond, V.UnOp(V.NOT, dd_cond), res) 
-              | (false, true) -> (V.UnOp(V.NOT, d_cond), dd_cond, res)
-              | (true, true) -> (d_cond, dd_cond, res)
-              | (false, false) -> 
-                  (V.UnOp(V.NOT, d_cond), V.UnOp(V.NOT, dd_cond), res)))
+                  (V.Ite(V.BinOp(V.BITAND, d_cond, V.UnOp(V.NOT, dd_cond)),
+                         self#ec (op, ty, d, V.UnOp(V.NEG, dd)),
+                         V.Ite(V.BinOp(V.BITAND, V.UnOp(V.NOT, d_cond), dd_cond),
+                               self#ec (op, ty, V.UnOp(V.NEG, d), dd),
+                               V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
+                                     self#ec (op, ty, V.BinOp(V.MINUS, rhs, lhs), dd),
+                                     self#ec (op, ty, d, V.UnOp(V.NEG, dd))))))
+              | _ -> failwith "invalid guard operation"))
     | _ -> 
         (Printf.eprintf "Unable to split %s\n" (V.exp_to_string e);
          raise Not_found)
@@ -543,7 +538,7 @@ class loop_record tail head g= object(self)
   (* iof_cond = lhs>0 && rhs<0 && lhs-rhs<lhs; if true, integer overflow happens*)
   (* when computing D*)
   (* TODO: handle IOF*)
-  method private compute_distance op ty lhs rhs check simplify =
+  method private compute_distance op ty lhs rhs simplify =
     let msg = ref "" in
     let res = 
       (match op with
@@ -558,8 +553,9 @@ class loop_record tail head g= object(self)
               in 
                 msg := !msg ^ (Printf.sprintf "loop_cond %s\n" (V.exp_to_string (simplify V.REG_1 loop_cond)));
                 msg := !msg ^ (Printf.sprintf "iof_cond %s\n" (V.exp_to_string (simplify V.REG_1 iof_cond)));
-                if not (check loop_cond) || check iof_cond then None
-                else Some (V.BinOp(V.MINUS, lhs, rhs)))
+                V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
+                      V.BinOp(V.MINUS, lhs, rhs),
+                      V.Constant(V.Int(ty, 0L))))
          | V.SLT -> 
              (let loop_cond = V.BinOp(V.SLE, rhs, lhs) in
               let iof_cond = 
@@ -571,19 +567,18 @@ class loop_record tail head g= object(self)
               in 
                 msg := !msg ^ (Printf.sprintf "loop_cond %s\n" (V.exp_to_string (simplify V.REG_1 loop_cond)));
                 msg := !msg ^ (Printf.sprintf "iof_cond %s\n" (V.exp_to_string (simplify V.REG_1 iof_cond)));
-                if not (check loop_cond) || check iof_cond then None
-                else Some (V.BinOp(V.MINUS, lhs, rhs)))
+                V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
+                      V.BinOp(V.MINUS, lhs, rhs),
+                      V.Constant(V.Int(ty, 0L))))
          | V.LE -> 
              (let cond = V.BinOp(V.LT, rhs, lhs) in
-                if not (check cond) then None
-                else Some (V.BinOp(V.MINUS, lhs, rhs)))
+                V.Ite(cond, V.BinOp(V.MINUS, lhs, rhs), V.Constant(V.Int(ty, 0L))))
          | V.LT -> 
              (let cond = V.BinOp(V.LE, rhs, lhs) in
-                if not (check cond) then None
-                else Some (V.BinOp(V.MINUS, lhs, rhs))) 
+                V.Ite(cond, V.BinOp(V.MINUS, lhs, rhs), V.Constant(V.Int(ty, 0L))))
          | V.EQ -> 
-             Some (V.BinOp(V.MINUS, lhs, rhs))
-         | _  -> None)
+             (V.BinOp(V.MINUS, lhs, rhs))
+         | _  -> V.Unknown("Unsupported comparison"))
     in
       if !opt_trace_loopsum_detailed then Printf.eprintf "%s" !msg;
       res
@@ -595,28 +590,25 @@ class loop_record tail head g= object(self)
         Printf.eprintf "At iter %d, check cjmp at %08Lx, op = %s\n" iter eip (V.binop_to_string op);
       (match self#is_known_guard eip gt with
          | Some g -> 
-             (let (_, _, _, _, _, d_opt, dd_opt, _, _) = g in
-              let d_opt' = self#compute_distance op ty lhs rhs check simplify in
-                (match (d_opt, d_opt', dd_opt) with
-                   | (Some d, Some d', Some dd) ->
-                       (let dd' = V.BinOp(V.MINUS, d', d) in
-                          if check (V.BinOp(V.EQ, dd, dd')) then
-                            self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip)
-                          else Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
-                   | (Some d, Some d', None) ->
-                       (let dd' = V.BinOp(V.MINUS, d', d) in
-                          self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip))
-                   | (_, _, None) -> Printf.eprintf "fail to compute D\n"
-                   | _ -> ()))
+             (let (_, _, _, _, _, d, dd, _, _) = g in
+              let d' = self#compute_distance op ty lhs rhs simplify in
+                if dd = V.Unknown("No dD") then
+                  (let dd' = V.BinOp(V.MINUS, d', d) in
+                     self#replace_g (eip, op, ty, d0_e, slice, d', dd', b, eip))
+                else
+                  (let dd' = V.BinOp(V.MINUS, d', d) in
+                     if check (V.BinOp(V.EQ, dd, dd')) then
+                       self#replace_g (eip, op, ty, d0_e, slice, d', dd', b, eip)
+                     else Printf.eprintf "Guard at 0x%Lx not inductive\n" eip))
          | None -> 
              (if iter = 2 then
-                (let d_opt = self#compute_distance op ty lhs rhs check simplify in
-                   match d_opt with
-                     | Some d ->
-                         (gt <- gt @ [eip, op, ty, d0_e, slice, d_opt, None, b, eeip];
+                (let d = self#compute_distance op ty lhs rhs simplify in
+                   match d with
+                     | V.Unknown(_) -> ()
+                     | _ ->
+                         (gt <- gt @ [eip, op, ty, d0_e, slice, d, V.Unknown("No dD"), b, eeip];
                           if !opt_trace_loopsum_detailed then                     
-                            Printf.eprintf "Add new guard at 0x%08Lx, D0 =  %s\n" eip (V.exp_to_string d))
-                     | None -> ())))
+                            Printf.eprintf "Add new guard at 0x%08Lx, D0 =  %s\n" eip (V.exp_to_string d)))))
 
   method private print_ivt ivt = 
     Printf.eprintf "* Inductive Variables Table [%d]\n" (List.length ivt);
@@ -719,7 +711,7 @@ class loop_record tail head g= object(self)
     let min_g_opt = self#is_known_guard geip gt in 
       match min_g_opt with
         | Some min_g ->
-            (let (d_cond, dd_cond, min_ec) = 
+            (let min_ec = 
                self#compute_ec min_g check eval_cond simplify unwrap_temp run_slice 
              in
              (* Construct the condition that Guard_i is the one with minimum EC*)
@@ -729,7 +721,7 @@ class loop_record tail head g= object(self)
                  List.iter (fun g ->
                               let (eip, _, _, _, _, _, _, _, _) = g in
                                 if not (eip = geip) then
-                                  (let (_, _, ec) = self#compute_ec g check eval_cond simplify unwrap_temp run_slice in
+                                  (let ec = self#compute_ec g check eval_cond simplify unwrap_temp run_slice in
                                      if !after_min then
                                        res := V.BinOp(V.BITAND, !res, V.BinOp(V.SLE, min_ec, ec))
                                      else
@@ -755,11 +747,7 @@ class loop_record tail head g= object(self)
              in
                (* Run the prog slice of each in-loop branch and eval*)
                Printf.eprintf "branch_cond: %s\n" (V.exp_to_string (branch_cond bdt));
-               V.BinOp(V.BITAND, 
-                       V.BinOp(V.BITAND, 
-                               V.BinOp(V.BITAND, d_cond, dd_cond), 
-                               (branch_cond bdt)), 
-                       (min_ec_cond geip gt)))
+               V.BinOp(V.BITAND, (branch_cond bdt), (min_ec_cond geip gt)))
         | _ -> failwith ""
 
   method compute_loop_body tail head (g:simple_graph) = 
@@ -848,7 +836,7 @@ class loop_record tail head g= object(self)
           | None -> failwith ""
           | Some g ->
               (let (_, _, _, _, _, _, _, _, eeip) = g in
-               let (_, _, ec) = self#compute_ec g check eval_cond simplify unwrap_temp run_slice in 
+               let ec = self#compute_ec g check eval_cond simplify unwrap_temp run_slice in 
                let vt = List.map (fun (offset, v, _, _, dv_opt) ->
                                     let ty = Vine_typecheck.infer_type_fast v in
                                     let v0 = load_iv offset ty in
