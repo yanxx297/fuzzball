@@ -1391,7 +1391,7 @@ struct
           loop vt;
       in
       let add_pc cond = 
-        Printf.eprintf "Add %s to PC\n" (V.exp_to_string cond);
+        Printf.eprintf "Add %s to PC\n" (V.exp_to_string (self#simplify_exp V.REG_1 cond));
         self#add_to_path_cond cond 
       in
         if self#is_loop_head eip && not self#before_first_branch then 
@@ -1408,7 +1408,7 @@ struct
                      apply_loopsum vt;
                      let res = spfm#run() in
                        self#set_eip eeip;
-                       Printf.printf "After applying loopsum at 0x%Lx, set eip to 0x%Lx\n" eip eeip;
+                       Printf.eprintf "After applying loopsum at 0x%Lx, set eip to 0x%Lx\n" eip eeip;
                        res)))
         else spfm#run()
 

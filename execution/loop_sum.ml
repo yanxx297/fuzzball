@@ -729,7 +729,7 @@ class loop_record tail head g= object(self)
                                   )
                                 else after_min := true
                  ) gt;
-                 Printf.eprintf "min_ec_cond = %s\n" (V.exp_to_string !res);
+                 Printf.eprintf "min_ec_cond = %s\n" (V.exp_to_string (simplify V.REG_1 !res));
                  !res
              in
              let branch_cond bdt =                
@@ -855,7 +855,7 @@ class loop_record tail head g= object(self)
            | h::rest ->
                (let (ivt, gt, _, geip) = h in
                 let precond = self#compute_precond h check eval_cond simplify unwrap_temp run_slice in
-                  Printf.eprintf "Precond[%d]: %s\n" id (V.exp_to_string precond);
+                  Printf.eprintf "Precond[%d]: %s\n" id (V.exp_to_string (simplify V.REG_1 precond));
                   if check (V.BinOp(V.BITAND, precond, conds)) then
                     (Printf.eprintf "lss[%d] is feasible\n" id;
                       feasibles := (V.BinOp(V.BITAND, precond, conds), 
