@@ -806,17 +806,17 @@ class loop_record tail head g= object(self)
           with
             | Not_found -> V.Constant(V.Int(V.REG_1, 0L)))
        in
-       let b = 
+       let b = check cond 
+          (*
          (if check cond then (add_pc cond; true)
           (* TODO: uncomment the code bellow to enable random decision*)
           (* and call add_pc accordingly*)
-          (*
            (Printf.eprintf "It is possible to use loopsum\n";
            let rand = random_bit in 
            Printf.eprintf "random: %B\n" rand;
            rand)
-           *)
           else (add_pc (V.UnOp(V.NOT, cond)); false))
+           *)
        in
          Printf.eprintf "precond: %s\n" (V.exp_to_string cond);
          if b then 
