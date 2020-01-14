@@ -813,18 +813,8 @@ class loop_record tail head g= object(self)
           with
             | Not_found -> V.Constant(V.Int(V.REG_1, 0L)))
        in
-       let b = check cond 
-          (*
-         (if check cond then (add_pc cond; true)
-          (* TODO: uncomment the code bellow to enable random decision*)
-          (* and call add_pc accordingly*)
-           (Printf.eprintf "It is possible to use loopsum\n";
-           let rand = random_bit in 
-           Printf.eprintf "random: %B\n" rand;
-           rand)
-          else (add_pc (V.UnOp(V.NOT, cond)); false))
-           *)
-       in
+       let b = check cond in
+         (* TODO: enable random decision and add cond to PC (only when no loopsum?) *)
          Printf.eprintf "precond: %s\n" (V.exp_to_string cond);
          if b then 
            (let b =  try_ext trans_func try_func non_try_func true_bit both_fail_func 0x0 in
@@ -877,22 +867,22 @@ class loop_record tail head g= object(self)
           let n = Random.int all in
           let (loopsum_cond, id, ivt, gt, geip) = (List.nth !feasibles n) in
           let (vt, eeip) = compute_iv_update (ivt, gt, geip) in
-            add_pc loopsum_cond;
-            (n, id, vt, eeip)
+            (n, id, !feasibles, vt, eeip)
     in
     (*TODO: modify this method so that try_ext code = lss id*)
     let extend_with_loopsum l id =
       let rec extend l level =
         match l with
           | h::rest -> 
-              (if level < id then
-                 (ignore(try_ext trans_func try_func non_try_func false_bit both_fail_func level);
-                  extend rest (level+1)
-                 )
-               else if level = id then
-                 ignore(try_ext trans_func try_func non_try_func true_bit both_fail_func level)
-               else failwith ""
-              )
+              (let (precond, _, _, _, _) = h in 
+                 if level < id then
+                   (ignore(try_ext trans_func try_func non_try_func false_bit both_fail_func level);
+                    add_pc (V.UnOp(V.NEG, precond));
+                    extend rest (level+1))
+                 else if level = id then
+                   (ignore(try_ext trans_func try_func non_try_func true_bit both_fail_func level);
+                    add_pc precond)
+                 else failwith "")
           | [] -> ()
       in
         extend l 1
@@ -908,9 +898,9 @@ class loop_record tail head g= object(self)
            | None -> 
                (if use_loopsum () then
                   (loopsum_status <- Some true;
-                   let (n, id, vt, eeip) =  choose_loopsum lss in
+                   let (n, id, feasibles, vt, eeip) =  choose_loopsum lss in
                      Printf.eprintf "Choose loopsum[%d]\n" id;
-                     extend_with_loopsum lss (n+1);
+                     extend_with_loopsum feasibles (n+1);
                      (vt, eeip))
                 else 
                   (loopsum_status <- Some false;
