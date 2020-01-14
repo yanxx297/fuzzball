@@ -494,40 +494,40 @@ class loop_record tail head g= object(self)
            assert(dd !=  V.Unknown("No dD"));
            (match op with
               | V.SLE | V.SLT ->
-                  (V.Ite(V.BinOp(V.BITAND, d_cond, V.UnOp(V.NOT, dd_cond)),
-                         self#ec (op, ty, d, V.UnOp(V.NEG, dd)),
-                         V.Ite(V.BinOp(V.BITAND, V.UnOp(V.NOT, d_cond), dd_cond),
-                               self#ec (op, ty, V.UnOp(V.NEG, d), dd),
-                               V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
-                                     self#ec (op, ty, 
-                                              V.BinOp(V.PLUS, 
-                                                      V.BinOp(V.MINUS, 
-                                                              V.Constant(V.Int(ty, Int64.sub (min_signed ty) 1L)), 
-                                                              lhs), dd), dd),
-                                     self#ec (op, ty, 
-                                              V.BinOp(V.MINUS, 
-                                                      V.BinOp(V.MINUS, 
-                                                              V.Constant(V.Int(ty, min_signed ty)), lhs), dd), 
-                                              V.UnOp(V.NEG, dd))))))
+                  (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
+                         self#ec (op, ty, 
+                                  V.Ite(d_cond, d, V.UnOp(V.NOT, d)), 
+                                  V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
+                         V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
+                               self#ec (op, ty, 
+                                        V.BinOp(V.PLUS, 
+                                                V.BinOp(V.MINUS, 
+                                                        V.Constant(V.Int(ty, Int64.sub (min_signed ty) 1L)), 
+                                                        lhs), dd), dd),
+                               self#ec (op, ty, 
+                                        V.BinOp(V.MINUS, 
+                                                V.BinOp(V.MINUS, 
+                                                        V.Constant(V.Int(ty, min_signed ty)), lhs), dd), 
+                                        V.UnOp(V.NEG, dd)))))
               | V.LE | V.LT ->
-                  (V.Ite(V.BinOp(V.BITAND, d_cond, V.UnOp(V.NOT, dd_cond)),
-                         self#ec (op, ty, d, V.UnOp(V.NEG, dd)),
-                         V.Ite(V.BinOp(V.BITAND, V.UnOp(V.NOT, d_cond), dd_cond),
-                               self#ec (op, ty, V.UnOp(V.NEG, d), dd),
-                               V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
-                                     self#ec (op, ty, V.BinOp(V.PLUS, 
-                                                              V.BinOp(V.MINUS, 
-                                                                      V.Constant(V.Int(ty, max_unsigned ty)), 
-                                                                      lhs), dd), dd),
-                                     self#ec (op, ty, V.BinOp(V.MINUS, lhs, dd), dd)))))
+                  (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
+                         self#ec (op, ty, 
+                                  V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
+                                  V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
+                         V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
+                               self#ec (op, ty, V.BinOp(V.PLUS, 
+                                                        V.BinOp(V.MINUS, 
+                                                                V.Constant(V.Int(ty, max_unsigned ty)), 
+                                                                lhs), dd), dd),
+                               self#ec (op, ty, V.BinOp(V.MINUS, lhs, dd), dd))))
               | V.EQ ->
-                  (V.Ite(V.BinOp(V.BITAND, d_cond, V.UnOp(V.NOT, dd_cond)),
-                         self#ec (op, ty, d, V.UnOp(V.NEG, dd)),
-                         V.Ite(V.BinOp(V.BITAND, V.UnOp(V.NOT, d_cond), dd_cond),
-                               self#ec (op, ty, V.UnOp(V.NEG, d), dd),
-                               V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
-                                     self#ec (op, ty, V.BinOp(V.MINUS, rhs, lhs), dd),
-                                     self#ec (op, ty, d, V.UnOp(V.NEG, dd))))))
+                  (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
+                         self#ec (op, ty, 
+                                  V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
+                                  V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
+                         V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
+                               self#ec (op, ty, V.BinOp(V.MINUS, rhs, lhs), dd),
+                               self#ec (op, ty, d, V.UnOp(V.NEG, dd)))))
               | _ -> failwith "invalid guard operation"))
     | _ -> 
         (Printf.eprintf "Unable to split %s\n" (V.exp_to_string e);
