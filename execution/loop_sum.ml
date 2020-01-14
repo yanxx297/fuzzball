@@ -478,7 +478,7 @@ class loop_record tail head g= object(self)
 
   (* Compute expected loop count from a certain guard*)
   (* D and dD should not be 0, otherwise current path never enter/exit the loop *)
-  method private compute_ec (_, op, ty, d0_e, slice, _, dd, b, _) 
+  method private compute_ec (_, op, ty, d0_e, slice, _, dd_opt, b, _) 
           check eval_cond simplify unwrap_temp run_slice =
     run_slice slice;
     let e = eval_cond d0_e in
@@ -486,12 +486,17 @@ class loop_record tail head g= object(self)
     | (Some lhs, Some rhs, _) ->
         (* Check integer overflow by checking whether D and dD are both *)
         (* positive/negative, and compute EC with modified D and dD accordingly*)
-        (let d = self#compute_distance op ty lhs rhs simplify in 
+        (let d_opt = self#compute_distance op ty lhs rhs simplify in
+         let d = 
+           (match d_opt with
+              | Some d -> assert(check (V.BinOp(V.NEQ, V.Constant(V.Int(ty, 0L)), d))); d
+              | None -> failwith "Unsupported comparison") in
+         let dd = 
+           (match dd_opt with
+              | Some dd -> assert(check (V.BinOp(V.NEQ, V.Constant(V.Int(ty, 0L)), dd))); dd
+              | None -> failwith "No dD") in
          let d_cond = V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), d) in
          let dd_cond = V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), dd) in
-           assert(check (V.BinOp(V.NEQ, V.Constant(V.Int(ty, 0L)), d)));
-           assert(check (V.BinOp(V.NEQ, V.Constant(V.Int(ty, 0L)), dd)));
-           assert(dd !=  V.Unknown("No dD"));
            (match op with
               | V.SLE | V.SLT ->
                   (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
@@ -553,9 +558,9 @@ class loop_record tail head g= object(self)
               in 
                 msg := !msg ^ (Printf.sprintf "loop_cond %s\n" (V.exp_to_string (simplify V.REG_1 loop_cond)));
                 msg := !msg ^ (Printf.sprintf "iof_cond %s\n" (V.exp_to_string (simplify V.REG_1 iof_cond)));
-                V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
-                      V.BinOp(V.MINUS, lhs, rhs),
-                      V.Constant(V.Int(ty, 0L))))
+                Some (V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
+                           V.BinOp(V.MINUS, lhs, rhs),
+                           V.Constant(V.Int(ty, 0L)))))
          | V.SLT -> 
              (let loop_cond = V.BinOp(V.SLE, rhs, lhs) in
               let iof_cond = 
@@ -567,18 +572,18 @@ class loop_record tail head g= object(self)
               in 
                 msg := !msg ^ (Printf.sprintf "loop_cond %s\n" (V.exp_to_string (simplify V.REG_1 loop_cond)));
                 msg := !msg ^ (Printf.sprintf "iof_cond %s\n" (V.exp_to_string (simplify V.REG_1 iof_cond)));
-                V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
-                      V.BinOp(V.MINUS, lhs, rhs),
-                      V.Constant(V.Int(ty, 0L))))
+                Some (V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
+                           V.BinOp(V.MINUS, lhs, rhs),
+                           V.Constant(V.Int(ty, 0L)))))
          | V.LE -> 
              (let cond = V.BinOp(V.LT, rhs, lhs) in
-                V.Ite(cond, V.BinOp(V.MINUS, lhs, rhs), V.Constant(V.Int(ty, 0L))))
+                Some (V.Ite(cond, V.BinOp(V.MINUS, lhs, rhs), V.Constant(V.Int(ty, 0L)))))
          | V.LT -> 
              (let cond = V.BinOp(V.LE, rhs, lhs) in
-                V.Ite(cond, V.BinOp(V.MINUS, lhs, rhs), V.Constant(V.Int(ty, 0L))))
+                Some (V.Ite(cond, V.BinOp(V.MINUS, lhs, rhs), V.Constant(V.Int(ty, 0L)))))
          | V.EQ -> 
-             (V.BinOp(V.MINUS, lhs, rhs))
-         | _  -> V.Unknown("Unsupported comparison"))
+             (Some (V.BinOp(V.MINUS, lhs, rhs)))
+         | _  -> None)
     in
       if !opt_trace_loopsum_detailed then Printf.eprintf "%s" !msg;
       res
@@ -590,25 +595,27 @@ class loop_record tail head g= object(self)
         Printf.eprintf "At iter %d, check cjmp at %08Lx, op = %s\n" iter eip (V.binop_to_string op);
       (match self#is_known_guard eip gt with
          | Some g -> 
-             (let (_, _, _, _, _, d, dd, _, _) = g in
-              let d' = self#compute_distance op ty lhs rhs simplify in
-                if dd = V.Unknown("No dD") then
-                  (let dd' = V.BinOp(V.MINUS, d', d) in
-                     self#replace_g (eip, op, ty, d0_e, slice, d', dd', b, eip))
-                else
-                  (let dd' = V.BinOp(V.MINUS, d', d) in
-                     if check (V.BinOp(V.EQ, dd, dd')) then
-                       self#replace_g (eip, op, ty, d0_e, slice, d', dd', b, eip)
-                     else Printf.eprintf "Guard at 0x%Lx not inductive\n" eip))
+             (let (_, _, _, _, _, d_opt, dd_opt, _, _) = g in
+              let d_opt' = self#compute_distance op ty lhs rhs simplify in
+                (match (d_opt, d_opt', dd_opt) with
+                   | (Some d, Some d', None) ->
+                       (let dd' = V.BinOp(V.MINUS, d', d) in
+                          self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip))
+                   | (Some d, Some d', Some dd) ->
+                       (let dd' = V.BinOp(V.MINUS, d', d) in
+                          if check (V.BinOp(V.EQ, dd, dd')) then
+                            self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip)
+                          else Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
+                   | _ -> ()))
          | None -> 
              (if iter = 2 then
-                (let d = self#compute_distance op ty lhs rhs simplify in
-                   match d with
-                     | V.Unknown(_) -> ()
-                     | _ ->
-                         (gt <- gt @ [eip, op, ty, d0_e, slice, d, V.Unknown("No dD"), b, eeip];
+                (let d_opt = self#compute_distance op ty lhs rhs simplify in
+                   match d_opt with
+                     | Some d ->
+                         (gt <- gt @ [eip, op, ty, d0_e, slice, d_opt, None, b, eeip];
                           if !opt_trace_loopsum_detailed then                     
-                            Printf.eprintf "Add new guard at 0x%08Lx, D0 =  %s\n" eip (V.exp_to_string d)))))
+                            Printf.eprintf "Add new guard at 0x%08Lx, D0 =  %s\n" eip (V.exp_to_string d))
+                     | None -> ())))
 
   method private print_ivt ivt = 
     Printf.eprintf "* Inductive Variables Table [%d]\n" (List.length ivt);
