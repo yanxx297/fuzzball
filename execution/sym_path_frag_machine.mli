@@ -303,6 +303,7 @@ sig
       (bool -> unit) -> (unit -> bool) -> (bool -> bool) -> int -> bool) ->
     bool ->
     (int -> bool) ->
+    (Vine.exp -> Vine.typ -> int64 option) ->
     int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * int64  
     method mark_extra_all_seen : (int -> unit) ->
         (int -> bool) -> (int -> int) -> (int -> int) -> unit

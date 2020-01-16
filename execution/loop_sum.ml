@@ -128,6 +128,39 @@ let max_unsigned ty =
     | V.REG_64 -> (0xffffffffffffffffL)
     | _  -> failwith "Illegal type\n" 
 
+(* Compute the Greatest Common Divisor using Extended Euclidean Algorithm *)
+(* ax + by = gcd(a, b), return (x, y, gcd(a, b))*)
+let rec gcd_extend a b  =
+  if a = 0 then (0, 1, b)
+  else
+    let (x, y, gcd) = gcd_extend (b mod a) a in
+    let x' = y - (b/a) * x in
+    let y' = x in
+      (x', y', gcd)
+
+(* Compute the modular inverse of `a` under modulo m *)
+(* if a and m are not coprime, return 0 *)
+let mod_inverse a m =
+  if m = 0L then 0L
+  else
+    (let a' = Int64.to_int a in
+     let m' = Int64.to_int m in
+      let (x, y, gcd) = gcd_extend a' m' in
+       if gcd = 1 then
+         Int64.of_int ((x mod m' + m') mod m')
+       else 0L)
+
+(* right shift d until the least significant bit is 1 *)
+(* d = d'*(2^j), return d' and j*)
+let split_to_prime d = 
+  let d' = ref (Int64.to_int d) in
+  let j = ref 0 in
+    while !d' mod 2 = 0 do
+      d' := !d' lsr 1;
+      j := !j + 1
+    done;
+    ((Int64.of_int !d'), !j)
+
 class simple_node id = object(self)
   val mutable domin = DS.singleton id
   val mutable domin_snap = DS.singleton id
@@ -479,7 +512,7 @@ class loop_record tail head g= object(self)
   (* Compute expected loop count from a certain guard*)
   (* D and dD should not be 0, otherwise current path never enter/exit the loop *)
   method private compute_ec (_, op, ty, d0_e, slice, _, dd_opt, b, _) 
-          check eval_cond simplify unwrap_temp run_slice =
+          check eval_cond simplify unwrap_temp query_unique_value run_slice =
     run_slice slice;
     let e = eval_cond d0_e in
     match (split_cond e b unwrap_temp) with
@@ -499,40 +532,85 @@ class loop_record tail head g= object(self)
          let dd_cond = V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), dd) in
            (match op with
               | V.SLE | V.SLT ->
-                  (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
-                         self#ec (op, ty, 
-                                  V.Ite(d_cond, d, V.UnOp(V.NOT, d)), 
-                                  V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
-                         V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
-                               self#ec (op, ty, 
-                                        V.BinOp(V.PLUS, 
-                                                V.BinOp(V.MINUS, 
-                                                        V.Constant(V.Int(ty, Int64.sub (min_signed ty) 1L)), 
-                                                        lhs), dd), dd),
-                               self#ec (op, ty, 
-                                        V.BinOp(V.MINUS, 
-                                                V.BinOp(V.MINUS, 
-                                                        V.Constant(V.Int(ty, min_signed ty)), lhs), dd), 
-                                        V.UnOp(V.NEG, dd)))))
+                  Some
+                    (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
+                           self#ec (op, ty, 
+                                    V.Ite(d_cond, d, V.UnOp(V.NOT, d)), 
+                                    V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
+                           V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
+                                 self#ec (op, ty, 
+                                          V.BinOp(V.PLUS, 
+                                                  V.BinOp(V.MINUS, 
+                                                          V.Constant(V.Int(ty, Int64.sub (min_signed ty) 1L)), 
+                                                          lhs), dd), dd),
+                                 self#ec (op, ty, 
+                                          V.BinOp(V.MINUS, 
+                                                  V.BinOp(V.MINUS, 
+                                                          V.Constant(V.Int(ty, min_signed ty)), lhs), dd), 
+                                          V.UnOp(V.NEG, dd)))))
               | V.LE | V.LT ->
-                  (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
-                         self#ec (op, ty, 
-                                  V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
-                                  V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
-                         V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
-                               self#ec (op, ty, V.BinOp(V.PLUS, 
-                                                        V.BinOp(V.MINUS, 
-                                                                V.Constant(V.Int(ty, max_unsigned ty)), 
-                                                                lhs), dd), dd),
-                               self#ec (op, ty, V.BinOp(V.MINUS, lhs, dd), dd))))
+                  Some
+                    (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
+                           self#ec (op, ty, 
+                                    V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
+                                    V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
+                           V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
+                                 self#ec (op, ty, V.BinOp(V.PLUS, 
+                                                          V.BinOp(V.MINUS, 
+                                                                  V.Constant(V.Int(ty, max_unsigned ty)), 
+                                                                  lhs), dd), dd),
+                                 self#ec (op, ty, V.BinOp(V.MINUS, lhs, dd), dd))))
               | V.EQ ->
-                  (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
-                         self#ec (op, ty, 
-                                  V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
-                                  V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
-                         V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
+                  (let reachable = 
+                     V.BinOp(V.EQ, 
+                             V.BinOp(V.MOD, 
+                                     V.Ite(d_cond, d, V.UnOp(V.NEG, d)), 
+                                     V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))), 
+                             V.Constant(V.Int(ty, 0L)))
+                   in
+                   let no_iof = V.BinOp(V.XOR, d_cond, dd_cond) in
+                     match (check no_iof, check reachable) with
+                       | (true, true) ->
+                           Some 
+                             (self#ec (op, ty, 
+                                       V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
+                                       V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))))
+                       | (true, false) -> None
+                       | (false, _) ->
+                           (match (query_unique_value dd ty) with
+                              | Some dd_conc ->
+                                  (let m = 
+                                     (match ty with
+                                        | V.REG_64 -> 0L
+                                        | _ -> Int64.add (max_unsigned ty) 1L)
+                                   in
+                                   let inverse = mod_inverse dd_conc m in
+                                     if inverse = 0L then
+                                       (let (dd_conc', j) = split_to_prime dd_conc in
+                                        let mask = 
+                                          Int64.shift_right_logical 
+                                            (max_unsigned ty) 
+                                            ((V.bits_of_width ty) - j)
+                                        in
+                                        let d_hi = V.BinOp(V.BITAND, d, 
+                                                           V.Constant(V.Int(ty, mask)))
+                                        in
+                                          match (query_unique_value d_hi ty) with 
+                                            | Some d_conc' -> 
+                                                Some (V.BinOp(V.TIMES, 
+                                                              V.Constant(V.Int(ty, dd_conc')),
+                                                              V.BinOp(V.RSHIFT, d, 
+                                                                      V.Constant(V.Int(ty, Int64.of_int j)))))
+                                            | None -> None)
+                                     else 
+                                       Some (V.BinOp(V.TIMES, d, 
+                                                     V.Constant(V.Int(ty, inverse)))))
+                              | None -> None))
+(*
+                        V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
                                self#ec (op, ty, V.BinOp(V.MINUS, rhs, lhs), dd),
-                               self#ec (op, ty, d, V.UnOp(V.NEG, dd)))))
+                               self#ec (op, ty, d, V.UnOp(V.NEG, dd)))
+ *)
               | _ -> failwith "invalid guard operation"))
     | _ -> 
         (Printf.eprintf "Unable to split %s\n" (V.exp_to_string e);
@@ -713,29 +791,36 @@ class loop_record tail head g= object(self)
           lss <- lss @ [(ivt, gt, Hashtbl.copy bdt, geip)];
         self#print_lss
 
-  method private compute_precond loopsum check eval_cond simplify unwrap_temp (run_slice: V.stmt list -> unit) =
+  method private compute_precond loopsum check eval_cond simplify unwrap_temp 
+          query_unique_value (run_slice: V.stmt list -> unit) =
     let (_, gt, bdt, geip) = loopsum in
     let min_g_opt = self#is_known_guard geip gt in 
       match min_g_opt with
         | Some min_g ->
-            (let min_ec = 
-               self#compute_ec min_g check eval_cond simplify unwrap_temp run_slice 
+            (* Construct the condition that Guard_i is the one with minimum EC*)
+            (let min_ec_opt = 
+               self#compute_ec min_g check eval_cond simplify unwrap_temp query_unique_value run_slice 
              in
-             (* Construct the condition that Guard_i is the one with minimum EC*)
              let min_ec_cond geip gt =
                let res = ref (V.Constant(V.Int(V.REG_1, 1L))) in
                let after_min = ref false in
-                 List.iter (fun g ->
-                              let (eip, _, _, _, _, _, _, _, _) = g in
-                                if not (eip = geip) then
-                                  (let ec = self#compute_ec g check eval_cond simplify unwrap_temp run_slice in
-                                     if !after_min then
-                                       res := V.BinOp(V.BITAND, !res, V.BinOp(V.SLE, min_ec, ec))
-                                     else
-                                       res := V.BinOp(V.BITAND, !res, V.BinOp(V.SLT, min_ec, ec))
-                                  )
-                                else after_min := true
-                 ) gt;
+                 (match min_ec_opt with
+                    | Some min_ec ->
+                        List.iter 
+                          (fun g ->
+                             let (eip, _, _, _, _, _, _, _, _) = g in
+                               if not (eip = geip) then
+                                 (match (self#compute_ec g check eval_cond simplify 
+                                           unwrap_temp query_unique_value run_slice) with
+                                    | Some ec -> 
+                                        if !after_min then
+                                          res := V.BinOp(V.BITAND, !res, V.BinOp(V.SLE, min_ec, ec))
+                                        else
+                                          res := V.BinOp(V.BITAND, !res, V.BinOp(V.SLT, min_ec, ec))
+                                    | None -> ())
+                               else after_min := true
+                          ) gt
+                    | None -> res := (V.Constant(V.Int(V.REG_1, 0L))));
                  Printf.eprintf "min_ec_cond = %s\n" (V.exp_to_string (simplify V.REG_1 !res));
                  !res
              in
@@ -786,8 +871,8 @@ class loop_record tail head g= object(self)
    NOTE: the update itself implemented in sym_region_frag_machine.ml*)
   (*TODO: loopsum preconds should be add to path cond*)
   method check_loopsum eip check (add_pc: V.exp -> unit) simplify load_iv eval_cond unwrap_temp
-            try_ext (random_bit:bool) (is_all_seen: int -> bool) (cur_ident: int) 
-            get_t_child get_f_child (add_node: int -> unit) run_slice = 
+          try_ext (random_bit:bool) (is_all_seen: int -> bool) query_unique_value
+          (cur_ident: int) get_t_child get_f_child (add_node: int -> unit) run_slice = 
     let trans_func (_ : bool) = V.Unknown("unused") in
     let try_func (_ : bool) (_ : V.exp) = true in
     let non_try_func (_ : bool) = () in
@@ -798,7 +883,8 @@ class loop_record tail head g= object(self)
       match l with
         | h::rest -> 
             (if cur = -1 || not (is_all_seen (get_t_child cur)) then
-               let precond = self#compute_precond h check eval_cond simplify unwrap_temp run_slice in
+               let precond = self#compute_precond h check eval_cond simplify 
+                               unwrap_temp query_unique_value run_slice in
                  V.BinOp(V.BITOR, precond, (get_precond rest (get_f_child cur)))
              else 
                get_precond rest (get_f_child cur)
@@ -833,15 +919,22 @@ class loop_record tail head g= object(self)
           | None -> failwith ""
           | Some g ->
               (let (_, _, _, _, _, _, _, _, eeip) = g in
-               let ec = self#compute_ec g check eval_cond simplify unwrap_temp run_slice in 
-               let vt = List.map (fun (offset, v, _, _, dv_opt) ->
-                                    let ty = Vine_typecheck.infer_type_fast v in
-                                    let v0 = load_iv offset ty in
-                                      match dv_opt with
-                                        | Some dv -> 
-                                            (offset, simplify ty (V.BinOp(V.PLUS, v0, V.BinOp(V.TIMES, ec, dv))))
-                                        | None -> failwith ""
-               ) ivt in 
+               let ec_opt = self#compute_ec g check eval_cond simplify unwrap_temp 
+                              query_unique_value run_slice in 
+               let vt = 
+                 (match ec_opt with
+                    | Some ec ->
+                        (List.map 
+                           (fun (offset, v, _, _, dv_opt) ->
+                              let ty = Vine_typecheck.infer_type_fast v in
+                              let v0 = load_iv offset ty in
+                                match dv_opt with
+                                  | Some dv -> 
+                                      (offset, simplify ty (V.BinOp(V.PLUS, v0, V.BinOp(V.TIMES, ec, dv))))
+                                  | None -> failwith ""
+                           ) ivt) 
+                    | None -> [])
+               in 
                  (vt, eeip))
     in
     let choose_loopsum l =
@@ -851,7 +944,8 @@ class loop_record tail head g= object(self)
         (match l with
            | h::rest ->
                (let (ivt, gt, _, geip) = h in
-                let precond = self#compute_precond h check eval_cond simplify unwrap_temp run_slice in
+                let precond = self#compute_precond h check eval_cond simplify unwrap_temp 
+                                query_unique_value run_slice in
                   Printf.eprintf "Precond[%d]: %s\n" id (V.exp_to_string (simplify V.REG_1 precond));
                   if check (V.BinOp(V.BITAND, precond, conds)) then
                     (Printf.eprintf "lss[%d] is feasible\n" id;
@@ -863,6 +957,7 @@ class loop_record tail head g= object(self)
       in
         get_feasible 0 l (V.Constant(V.Int(V.REG_1, 1L)));
         let all = List.length !feasibles in
+          Printf.eprintf "feasible lss = %d\n" all;
           if all <= 0 then failwith "Inconsistency between use_loopsum and choose_loopsum\n";
           let n = Random.int all in
           let (loopsum_cond, id, ivt, gt, geip) = (List.nth !feasibles n) in
@@ -870,7 +965,7 @@ class loop_record tail head g= object(self)
             (n, id, !feasibles, vt, eeip)
     in
     (*TODO: modify this method so that try_ext code = lss id*)
-    let extend_with_loopsum l id =
+    let extend_with_loopsum l id =      
       let rec extend l level =
         match l with
           | h::rest -> 
@@ -1102,8 +1197,8 @@ class dynamic_cfg (eip : int64) = object(self)
   method is_loop_head eip = Hashtbl.mem looplist eip 
 
   method check_loopsum eip check add_pc simplify load_iv eval_cond unwrap_temp
-                              try_ext random_bit is_all_seen cur_ident get_t_child
-                              get_f_child add_loopsum_node run_slice = 
+                              try_ext random_bit is_all_seen query_unique_value
+                              cur_ident get_t_child get_f_child add_loopsum_node run_slice = 
     let trans_func (_ : bool) = V.Unknown("unused") in
     let try_func (_ : bool) (_ : V.exp) = true in
     let non_try_func (_ : bool) = () in
@@ -1113,8 +1208,8 @@ class dynamic_cfg (eip : int64) = object(self)
         | Some l -> 
             (let add_node ident = add_loopsum_node ident l in 
                l#check_loopsum eip check add_pc simplify load_iv eval_cond unwrap_temp
-                 try_ext random_bit is_all_seen cur_ident get_t_child get_f_child 
-                 add_node run_slice)
+                 try_ext random_bit is_all_seen query_unique_value
+                 cur_ident get_t_child get_f_child add_node run_slice)
         | None -> 
             ignore(try_ext trans_func try_func non_try_func (fun() -> false) both_fail_func 0xffff);
             ([], 0L)

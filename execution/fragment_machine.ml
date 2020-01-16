@@ -566,6 +566,7 @@ class virtual fragment_machine = object
       (bool -> unit) -> (unit -> bool) -> (bool -> bool) -> int -> bool) ->
     bool ->
     (int -> bool) ->
+    (Vine.exp -> Vine.typ -> int64 option) ->
     int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * int64  
   method virtual mark_extra_all_seen : (int -> unit) ->
     (int -> bool) -> (int -> int) -> (int -> int) -> unit
@@ -881,14 +882,14 @@ struct
       loop_enter_nodes <- (ident, l)::loop_enter_nodes
 
     method check_loopsum eip check add_pc simplify eval_int eval_cond unwrap_temp
-                                try_ext random_bit is_all_seen cur_ident 
-                                get_t_child get_f_child = 
+                                        try_ext random_bit is_all_seen query_unique_value
+                                        cur_ident get_t_child get_f_child = 
       match current_dcfg with
         | None -> ([], 0L)
         | Some dcfg -> 
             dcfg#check_loopsum eip check add_pc simplify eval_int eval_cond unwrap_temp 
-              try_ext random_bit is_all_seen cur_ident get_t_child get_f_child 
-              self#add_loopsum_node self#run_slice
+              try_ext random_bit is_all_seen query_unique_value
+              cur_ident get_t_child get_f_child self#add_loopsum_node self#run_slice
 
     method simplify_exp typ e = e
 

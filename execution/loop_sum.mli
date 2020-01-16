@@ -62,6 +62,7 @@ class loop_record : int64 -> int64 -> simple_graph -> object
       (bool -> unit) -> (unit -> bool) -> (bool -> bool) -> int -> bool) ->
     bool ->
     (int -> bool) ->
+    (Vine.exp -> Vine.typ -> int64 option) ->
     int -> (int -> int) -> (int -> int) -> (int -> unit) -> 
     (Vine.stmt list -> unit) ->
     (int64 * Vine.exp) list * int64  
@@ -99,6 +100,7 @@ class dynamic_cfg : int64 -> object
       (bool -> unit) -> (unit -> bool) -> (bool -> bool) -> int -> bool) ->
     bool ->
     (int -> bool) ->
+    (Vine.exp -> Vine.typ -> int64 option) ->
     int -> (int -> int) -> (int -> int) -> (int -> loop_record -> unit) -> 
     (Vine.stmt list -> unit) ->
     (int64 * Vine.exp) list * int64  

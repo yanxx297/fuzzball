@@ -1397,8 +1397,8 @@ struct
         if self#is_loop_head eip && not self#before_first_branch then 
           (let (vt, eeip) = self#check_loopsum eip check add_pc self#simplify_exp 
                               load_iv eval_cond self#unwrap_temp try_ext 
-                              dt#random_bit dt#is_all_seen dt#cur_ident
-                              dt#get_t_child dt#get_f_child 
+                              dt#random_bit dt#is_all_seen spfm#query_unique_value
+                              dt#cur_ident dt#get_t_child dt#get_f_child 
            in
              (match vt with
                 | [] -> spfm#run()
