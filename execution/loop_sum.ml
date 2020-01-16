@@ -131,10 +131,10 @@ let max_unsigned ty =
 (* Compute the Greatest Common Divisor using Extended Euclidean Algorithm *)
 (* ax + by = gcd(a, b), return (x, y, gcd(a, b))*)
 let rec gcd_extend a b  =
-  if a = 0 then (0, 1, b)
+  if a = 0L then (0L, 1L, b)
   else
-    let (x, y, gcd) = gcd_extend (b mod a) a in
-    let x' = y - (b/a) * x in
+    let (x, y, gcd) = gcd_extend (Vine_util.int64_urem b a) a in
+    let x' = Int64.sub y (Int64.mul (Int64.div b a) x) in
     let y' = x in
       (x', y', gcd)
 
@@ -143,23 +143,21 @@ let rec gcd_extend a b  =
 let mod_inverse a m =
   if m = 0L then 0L
   else
-    (let a' = Int64.to_int a in
-     let m' = Int64.to_int m in
-      let (x, y, gcd) = gcd_extend a' m' in
-       if gcd = 1 then
-         Int64.of_int ((x mod m' + m') mod m')
-       else 0L)
+    let (x, y, gcd) = gcd_extend a m in
+      if gcd = 1L then
+        Vine_util.int64_urem (Int64.add (Vine_util.int64_urem x m) m) m
+      else 0L
 
 (* right shift d until the least significant bit is 1 *)
 (* d = d'*(2^j), return d' and j*)
 let split_to_prime d = 
-  let d' = ref (Int64.to_int d) in
+  let d' = ref d in
   let j = ref 0 in
-    while !d' mod 2 = 0 do
-      d' := !d' lsr 1;
+    while (Vine_util.int64_urem !d' 2L) = 0L do
+      d' := Int64.shift_right_logical !d' 1;
       j := !j + 1
     done;
-    ((Int64.of_int !d'), !j)
+    (!d', !j)
 
 class simple_node id = object(self)
   val mutable domin = DS.singleton id
