@@ -954,6 +954,7 @@ class loop_record tail head g= object(self)
            | [] -> ())
       in
         get_feasible 0 l (V.Constant(V.Int(V.REG_1, 1L)));
+        feasibles := List.rev !feasibles;
         let all = List.length !feasibles in
           Printf.eprintf "feasible lss = %d\n" all;
           if all <= 0 then failwith "Inconsistency between use_loopsum and choose_loopsum\n";
