@@ -935,6 +935,23 @@ class loop_record tail head g= object(self)
                in 
                  (vt, eeip))
     in
+    let extend_with_loopsum_dry l id cur =
+      Printf.eprintf "Check whether %d(parent %d) is all_seen\n" (get_t_child cur) cur;
+      let rec extend l level cur =
+        if cur = -1 then true
+        else
+          (match l with
+             | h::rest ->
+                 (if level < id then extend rest (level + 1) (get_f_child cur)
+                  else if level = id then
+                    (let b = (is_all_seen (get_t_child cur)) in
+                       not b
+                    )
+                  else failwith (Printf.sprintf "Cannot find LS[%d]\n" id))
+             | _ -> true)
+      in
+        extend l 1 cur
+    in
     let choose_loopsum l =
       let feasibles = ref [] in
       let rec get_feasible id l conds = 
@@ -956,12 +973,16 @@ class loop_record tail head g= object(self)
         get_feasible 0 l (V.Constant(V.Int(V.REG_1, 1L)));
         feasibles := List.rev !feasibles;
         let all = List.length !feasibles in
+        let n = ref (Random.int all) in
           Printf.eprintf "feasible lss = %d\n" all;
           if all <= 0 then failwith "Inconsistency between use_loopsum and choose_loopsum\n";
-          let n = Random.int all in
-          let (loopsum_cond, id, ivt, gt, geip) = (List.nth !feasibles n) in
+          while not (extend_with_loopsum_dry !feasibles (!n+1) (get_t_child cur_ident)) do
+            Printf.eprintf "\tRand = %d\n" !n;
+            n := Random.int all
+          done;
+          let (loopsum_cond, id, ivt, gt, geip) = (List.nth !feasibles !n) in
           let (vt, eeip) = compute_iv_update (ivt, gt, geip) in
-            (n, id, !feasibles, vt, eeip)
+            (!n, id, !feasibles, vt, eeip)
     in
     (*TODO: modify this method so that try_ext code = lss id*)
     let extend_with_loopsum l id =      
