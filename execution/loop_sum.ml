@@ -877,11 +877,34 @@ class loop_record tail head g= object(self)
     let both_fail_func (b : bool) = b in
     let true_bit () = true in
     let false_bit () = false in
+    let get_feasible l =
+      let feasibles = ref [] in
+      let rec check_node id l conds = 
+        Printf.eprintf "conds[%d]:%s\n" id (V.exp_to_string (simplify V.REG_1 conds));
+        (match l with
+           | h::rest ->
+               (let (ivt, gt, bdt, geip) = h in
+                let precond = self#compute_precond h check eval_cond simplify unwrap_temp 
+                                query_unique_value run_slice in
+                  Printf.eprintf "Precond[%d]: %s\n" id (V.exp_to_string (simplify V.REG_1 precond));
+                  if check (V.BinOp(V.BITAND, precond, conds)) then
+                    (Printf.eprintf "lss[%d] is feasible\n" id;
+                     feasibles := (V.BinOp(V.BITAND, precond, conds), 
+                                   id, ivt, gt, bdt, geip)::!feasibles)
+                  else Printf.eprintf "lss[%d] is infeasible\n" id;
+                  check_node (id+1) rest (V.BinOp(V.BITAND, conds, V.UnOp(V.NOT, precond))))
+           | [] -> ())
+      in
+        check_node 0 l (V.Constant(V.Int(V.REG_1, 1L)));
+        List.rev !feasibles
+    in
     let rec get_precond l cur =
       match l with
         | h::rest -> 
             (if cur = -1 || not (is_all_seen (get_t_child cur)) then
-               let precond = self#compute_precond h check eval_cond simplify 
+               let (_, _, ivt, gt, bdt, geip) = h in
+               let loopsum = (ivt, gt, bdt, geip) in
+               let precond = self#compute_precond loopsum check eval_cond simplify 
                                unwrap_temp query_unique_value run_slice in
                  V.BinOp(V.BITOR, precond, (get_precond rest (get_f_child cur)))
              else 
@@ -889,11 +912,11 @@ class loop_record tail head g= object(self)
             ) 
         | [] -> V.Constant(V.Int(V.REG_1, 0L))
     in
-    let use_loopsum () =
+    let use_loopsum l =
       (add_node cur_ident;
        let cond = 
          (try 
-            get_precond lss (get_t_child cur_ident)
+            get_precond l (get_t_child cur_ident)
           with
             | Not_found -> V.Constant(V.Int(V.REG_1, 0L)))
        in
@@ -952,44 +975,25 @@ class loop_record tail head g= object(self)
       in
         extend l 1 cur
     in
-    let choose_loopsum l =
-      let feasibles = ref [] in
-      let rec get_feasible id l conds = 
-        Printf.eprintf "conds[%d]:%s\n" id (V.exp_to_string (simplify V.REG_1 conds));
-        (match l with
-           | h::rest ->
-               (let (ivt, gt, _, geip) = h in
-                let precond = self#compute_precond h check eval_cond simplify unwrap_temp 
-                                query_unique_value run_slice in
-                  Printf.eprintf "Precond[%d]: %s\n" id (V.exp_to_string (simplify V.REG_1 precond));
-                  if check (V.BinOp(V.BITAND, precond, conds)) then
-                    (Printf.eprintf "lss[%d] is feasible\n" id;
-                      feasibles := (V.BinOp(V.BITAND, precond, conds), 
-                                  id, ivt, gt, geip)::!feasibles)
-                  else Printf.eprintf "lss[%d] is infeasible\n" id;
-                  get_feasible (id+1) rest (V.BinOp(V.BITAND, conds, V.UnOp(V.NOT, precond))))
-           | [] -> ())
-      in
-        get_feasible 0 l (V.Constant(V.Int(V.REG_1, 1L)));
-        feasibles := List.rev !feasibles;
-        let all = List.length !feasibles in
-        let n = ref (Random.int all) in
-          Printf.eprintf "feasible lss = %d\n" all;
-          if all <= 0 then failwith "Inconsistency between use_loopsum and choose_loopsum\n";
-          while not (extend_with_loopsum_dry !feasibles (!n+1) (get_t_child cur_ident)) do
-            Printf.eprintf "\tRand = %d\n" !n;
-            n := Random.int all
-          done;
-          let (loopsum_cond, id, ivt, gt, geip) = (List.nth !feasibles !n) in
-          let (vt, eeip) = compute_iv_update (ivt, gt, geip) in
-            (!n, id, !feasibles, vt, eeip)
+    let choose_loopsum feasibles =
+      let all = List.length feasibles in
+      let n = ref (Random.int all) in
+        Printf.eprintf "feasible lss = %d\n" all;
+        if all <= 0 then failwith "Inconsistency between use_loopsum and choose_loopsum\n";
+        while not (extend_with_loopsum_dry feasibles (!n+1) (get_t_child cur_ident)) do
+          Printf.eprintf "\tRand = %d\n" !n;
+          n := Random.int all
+        done;
+        let (loopsum_cond, id, ivt, gt, _, geip) = (List.nth feasibles !n) in
+        let (vt, eeip) = compute_iv_update (ivt, gt, geip) in
+          (!n, id, vt, eeip)
     in
     (*TODO: modify this method so that try_ext code = lss id*)
     let extend_with_loopsum l id =      
       let rec extend l level =
         match l with
           | h::rest -> 
-              (let (precond, _, _, _, _) = h in 
+              (let (precond, _, _, _, _, _) = h in 
                  if level < id then
                    (ignore(try_ext trans_func try_func non_try_func false_bit both_fail_func level);
                     add_pc (V.UnOp(V.NEG, precond));
@@ -1003,7 +1007,7 @@ class loop_record tail head g= object(self)
         extend l 1
     in
       if not (self#get_iter = 2) then ([], 0L)
-      else
+      else let feasibles = get_feasible lss in 
         (match loopsum_status with
            (*NOTE: should also extend useLoopsum node for Some ture/false status? *)
            | Some true -> 
@@ -1011,9 +1015,9 @@ class loop_record tail head g= object(self)
            | Some false -> 
                Printf.eprintf "Loop has been checked but no loopsum applies in 0x%Lx\n" eip; ([], 0L)
            | None -> 
-               (if use_loopsum () then
+               (if use_loopsum feasibles then
                   (loopsum_status <- Some true;
-                   let (n, id, feasibles, vt, eeip) =  choose_loopsum lss in
+                   let (n, id, vt, eeip) =  choose_loopsum feasibles in
                      Printf.eprintf "Choose loopsum[%d]\n" id;
                      extend_with_loopsum feasibles (n+1);
                      (vt, eeip))
