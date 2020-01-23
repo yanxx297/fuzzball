@@ -351,7 +351,11 @@ class binary_decision_tree = object(self)
       let id = n.ident in
       let eip = Int64.shift_right_logical n.eip_loc 16 in
       let ident = Int64.logand 0x000000000000ffffL n.eip_loc in 
-        Printf.fprintf fd "%d [label=\"%d:0x%Lx (0x%Lx)\"];\n" id id eip ident;
+      let style = 
+        (if (Int64.logand ident 0xc000L) = 0xc000L then "style=filled fillcolor=yellow"
+         else "")
+      in
+        Printf.fprintf fd "%d [label=\"%d:0x%Lx (0x%Lx)\" %s];\n" id id eip ident style;
         (match get_f_child n with 
            | Some(Some f) -> (Printf.fprintf fd "%d -> %d [label = \"false\"];\n" id f.ident ;viz_node f)
            | _ -> ());
