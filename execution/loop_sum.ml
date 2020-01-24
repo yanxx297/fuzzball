@@ -288,6 +288,15 @@ class loop_record tail head g= object(self)
   val id = head
   val loop_body = Hashtbl.create 100
 
+  (* loopsum set (lss) = (ivt, gt, bdt, geip)*)
+  (* geip := the guard to leave from*)
+  (* bdt := in-loop branch decision *)
+  val mutable lss = []
+
+  method get_lss = lss
+
+  method set_lss s = lss <- s
+
   (* List of in-loop branch conditions and the associated prog slices *)
   (* This list is shared among all summaries in the same lss*)
   (* bt := (eip -> (cond, slice))*)
@@ -664,6 +673,21 @@ class loop_record tail head g= object(self)
       if !opt_trace_loopsum_detailed then Printf.eprintf "%s" !msg;
       res
 
+  method private branch_to_guard l g =
+    let (eip, _, _, _, _, _, _, _, _) = g in
+    Printf.eprintf "branch_to_guard at %Lx\n" eip;
+    let lss' = 
+      List.map (fun ls ->
+                   let (ivt, gt, bdt, geip) = ls in
+                     match (Hashtbl.find_opt bdt eip) with
+                       | Some bd -> 
+                           (let gt' = gt @ [g] in
+                              Hashtbl.remove bdt eip;
+                              (ivt, gt', bdt, geip))
+                       | None -> ls
+      ) l in
+      lss <- lss'
+
   (* Add or update a guard table entry*)
   method add_g g' check simplify =
     let (eip, op, ty, d0_e, (slice: V.stmt list), lhs, rhs, b, eeip) = g' in
@@ -686,12 +710,23 @@ class loop_record tail head g= object(self)
          | None -> 
              (if iter = 2 then
                 (let d_opt = self#compute_distance op ty lhs rhs simplify in
+                 let g = (eip, op, ty, d0_e, slice, d_opt, None, b, eeip) in
                    match d_opt with
                      | Some d ->
-                         (gt <- gt @ [eip, op, ty, d0_e, slice, d_opt, None, b, eeip];
+                         (gt <- gt @ [g];
+                          match (Hashtbl.find_opt bt eip) with
+                            | Some branch -> 
+                                (Hashtbl.remove bt eip;
+                                 self#branch_to_guard lss g)
+                            | None -> (Printf.eprintf "add_g: no bt entry associated with %Lx\n" eip);
                           if !opt_trace_loopsum_detailed then                     
-                            Printf.eprintf "Add new guard at 0x%08Lx, D0 =  %s\n" eip (V.exp_to_string d))
-                     | None -> ())))
+                            Printf.eprintf "add_g: add new guard at 0x%08Lx, D0 =  %s\n" eip (V.exp_to_string d))
+                     | None ->
+                         (* Currently not sure whether this CJmp is a Guard or in-loop branch *)
+                         (* Add it as a branch now and remove later if it is a Guard *)
+                         (Printf.eprintf "add_g: fail to compute D0 at %Lx, still add it to bt and bdt\n" eip;
+                          self#add_slice eip d0_e slice;
+                          self#add_bd eip b))))
 
   method private print_ivt ivt = 
     Printf.eprintf "* Inductive Variables Table [%d]\n" (List.length ivt);
@@ -732,15 +767,6 @@ class loop_record tail head g= object(self)
 
   method add_insn (eip:int64) = 
     Hashtbl.replace loop_body eip ()
-
-  (* loopsum set (lss) = (ivt, gt, bdt, geip)*)
-  (* geip := the guard to leave from*)
-  (* bdt := in-loop branch decision *)
-  val mutable lss = []
-
-  method get_lss = lss
-
-  method set_lss s = lss <- s
 
   (* Return true if new loopsum n already exist in lss *)
   method private check_dup_lss n = 
