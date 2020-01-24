@@ -374,9 +374,9 @@ class loop_record tail head g= object(self)
     else
       let res = ref true in
         List.iteri (fun i iv ->
-                      let (_, v, _, _, dv) = iv  
-                      and (_, v', _, _, dv') = List.nth ivt' i in
-                        if not (v = v' && dv = dv') then res := false
+                      let (off, _, _, _, dv) = iv
+                      and (off', _, _, _, dv') = List.nth ivt' i in
+                        if not (off = off' && dv = dv') then res := false
         ) ivt;
         !res
 
