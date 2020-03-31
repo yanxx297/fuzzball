@@ -1052,12 +1052,8 @@ class loop_record tail head g= object(self)
                    ([], 0L))))
 
   (* Print loopsum status when exiting a loop*)
-  method finish_loop = 
-    if !opt_trace_loopsum then
-      (self#print_gt gt;
-       self#print_ivt ivt;
-       self#print_bdt bdt)
-       
+  method finish_loop =
+    ()
 
   method reset =
     iter <- 0;
