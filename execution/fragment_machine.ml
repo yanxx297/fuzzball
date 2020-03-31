@@ -799,10 +799,13 @@ struct
         (match vars with
            | var::rest ->
                (if lval = var then 
-                  (Printf.eprintf "Remove %s = %s\n" (V.exp_to_string (V.Lval(lval))) (V.exp_to_string (V.Lval(var))); (true, rest))
+                  (if !opt_trace_loopsum_detailed then
+                     Printf.eprintf "Remove %s = %s\n" (V.exp_to_string (V.Lval(lval))) (V.exp_to_string (V.Lval(var))); 
+                   (true, rest))
                 else 
-                  (Printf.eprintf "No Remove %s != %s\n" (V.exp_to_string (V.Lval(lval))) (V.exp_to_string (V.Lval(var)));
-                    let (res, tail) = check_vars lval rest in (res, var::tail)))
+                  (if !opt_trace_loopsum_detailed then 
+                     Printf.eprintf "No Remove %s != %s\n" (V.exp_to_string (V.Lval(lval))) (V.exp_to_string (V.Lval(var)));
+                   let (res, tail) = check_vars lval rest in (res, var::tail)))
            | [] -> (false, vars)
         )
       in
@@ -816,11 +819,9 @@ struct
            | _ -> (false, vars))
       in
       let rec loop_insn vars l =
-        self#print_vars vars;
         (match l with
            | stmt::rest ->
-               (Printf.eprintf "%s\n" (V.stmt_to_string stmt);
-                let (in_slice, vars) = stmt_scan vars stmt in
+               (let (in_slice, vars) = stmt_scan vars stmt in
                 let (tail, vars) = loop_insn vars rest in
                   if in_slice then (stmt::tail, vars)
                   else (tail, vars))
