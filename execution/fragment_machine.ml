@@ -551,7 +551,7 @@ class virtual fragment_machine = object
   method virtual update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method virtual print_dt : unit
   method virtual add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
-      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> unit
+      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
   method virtual handle_branch : int64 -> Vine.exp -> bool -> unit
   method virtual simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
   method virtual check_loopsum : int64 ->
@@ -713,7 +713,7 @@ struct
         | None -> false
         | Some g -> g#is_iv_cond cond
 
-    method add_g g check simplify = 
+    method add_g g check simplify query_unique_value = 
       match current_dcfg with
         | None -> ()
         | Some dcfg -> 
@@ -721,11 +721,11 @@ struct
              let d0_e = self#replace_temps_exp cond in 
                (match (dcfg#is_known_guard eip) with
                   | Some (_, _, _, _, slice, _, _, _, _) -> 
-                      dcfg#add_g (eip, op, ty, d0_e, slice, lhs, rhs, b, eeip) check simplify
+                      dcfg#add_g (eip, op, ty, d0_e, slice, lhs, rhs, b, eeip) check simplify query_unique_value
                   | None ->
                       (let (slice, _) = self#prog_slicing (self#get_vars cond) path_cache in
                          self#print_slice slice;
-                         dcfg#add_g (eip, op, ty, d0_e, slice, lhs, rhs, b, eeip) check simplify)))
+                         dcfg#add_g (eip, op, ty, d0_e, slice, lhs, rhs, b, eeip) check simplify query_unique_value)))
 
     val temps = V.VarHash.create 100
 

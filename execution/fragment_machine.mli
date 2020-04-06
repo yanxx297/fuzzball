@@ -310,7 +310,7 @@ class virtual fragment_machine : object
   method virtual update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method virtual print_dt : unit
   method virtual add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
-      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> unit
+      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
   method virtual handle_branch : int64 -> Vine.exp -> bool -> unit
   method virtual simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
   method virtual check_loopsum : int64 ->
@@ -617,7 +617,7 @@ sig
     method update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
     method is_iv_cond : Vine.exp -> bool
     method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
-      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> unit
+      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
     method handle_branch: int64 -> Vine.exp -> bool -> unit
     method check_loopsum : int64 -> 
     (Vine.exp -> bool) ->

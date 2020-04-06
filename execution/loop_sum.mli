@@ -31,7 +31,7 @@ class loop_record : int64 -> int64 -> simple_graph -> object
     (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.exp option *
      Vine.exp option * bool * int64) option
   method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.exp * Vine.exp * bool * int64 ->
-    (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> unit
+    (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
   method get_gt : (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.exp option *
                    Vine.exp option * bool * int64) list                                                                  
   method get_lss: ((int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option) list *
@@ -85,7 +85,7 @@ class dynamic_cfg : int64 -> object
     (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.exp option *
      Vine.exp option * bool * int64) option
   method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.exp * Vine.exp * bool * int64 ->
-    (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> unit
+    (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
   method make_snap : unit
   method reset_snap : unit
   method check_loopsum : int64 ->

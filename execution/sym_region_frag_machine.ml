@@ -1192,12 +1192,16 @@ struct
                              targ in_loop_targ
                          else
                            (let eeip = if in_loop_targ = targ1 then targ2 else targ1 in
-                            let check e =
+                            let is_valid e =
                               let ty = Vine_typecheck.infer_type_fast e in
-                              let (is_sat, _) = self#query_with_path_cond (self#simplify_exp ty e) true in
-                                is_sat
+                              let (is_sat_r, _) = self#query_with_path_cond (self#simplify_exp ty (V.UnOp(V.NOT, e))) true in
+                                if not is_sat_r then
+                                  Printf.eprintf "%s is valid\n" (V.exp_to_string e)
+                                else
+                                  Printf.eprintf "%s is not valid\n" (V.exp_to_string e);
+                                not is_sat_r
                             in
-                              spfm#add_g (self#get_eip, op, ty_l, exp, lhs', rhs', b, eeip) check self#simplify_exp))
+                              spfm#add_g (self#get_eip, op, ty_l, exp, lhs', rhs', b, eeip) is_valid self#simplify_exp spfm#query_unique_value))
                   | _ -> ())
            | _ -> 
                (let eip = self#get_eip in

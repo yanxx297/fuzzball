@@ -689,7 +689,7 @@ class loop_record tail head g= object(self)
       lss <- lss'
 
   (* Add or update a guard table entry*)
-  method add_g g' check simplify =
+  method add_g g' check simplify query_unique_value =
     let (eip, op, ty, d0_e, (slice: V.stmt list), lhs, rhs, b, eeip) = g' in
       if !opt_trace_loopsum_detailed then
         Printf.eprintf "At iter %d, check cjmp at %08Lx, op = %s\n" iter eip (V.binop_to_string op);
@@ -700,7 +700,10 @@ class loop_record tail head g= object(self)
                 (match (d_opt, d_opt', dd_opt) with
                    | (Some d, Some d', None) ->
                        (let dd' = V.BinOp(V.MINUS, d', d) in
-                          self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip))
+                          match query_unique_value dd' ty with
+                            | Some (v: int64) ->
+                                self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip)
+                            | None ->())
                    | (Some d, Some d', Some dd) ->
                        (let dd' = V.BinOp(V.MINUS, d', d) in
                           if check (V.BinOp(V.EQ, dd, dd')) then
@@ -739,8 +742,11 @@ class loop_record tail head g= object(self)
 
   method private print_gt gt =
     Printf.eprintf "* Guard Table [%d]\n" (List.length gt);
-    List.iteri (fun i (eip, _, _, d0_e, _,  _, _, _, eeip) ->
-                  Printf.eprintf "[%d]\t0x%Lx\t%s\t0x%Lx\n" i eip (V.exp_to_string d0_e) eeip
+    List.iteri (fun i (eip, _, _, d0_e, _,  _, dd, _, eeip) ->
+                  Printf.eprintf "[%d]\t0x%Lx\t%s\t0x%Lx" i eip (V.exp_to_string d0_e) eeip;
+                  match dd with
+                    | Some d -> Printf.eprintf "\t(+ %s)\n" (V.exp_to_string d)
+                    | None -> Printf.eprintf "\t [dD N/A]\n"
     ) gt
 
   method private print_bdt bdt = 
@@ -802,13 +808,20 @@ class loop_record tail head g= object(self)
     if (self#is_known_guard geip gt) = None then
       Printf.eprintf "No lss saved since %Lx is not a guard\n" geip
     else
-      let all_valid = ref true in
+      let iv_all_valid = ref true in
+      let g_all_valid = ref true in
         List.iter (fun iv ->
                      let (_, _, _, _, dv) = iv in
-                       if dv = None then all_valid := false 
+                       if dv = None then iv_all_valid := false 
         ) ivt;
-        if not !all_valid then
+        List.iter (fun g ->
+                     let (_, _, _, _, _, _, dd, _, _) = g in
+                       if dd = None then g_all_valid := false 
+        ) gt;
+        if not !iv_all_valid then
           Printf.eprintf "No lss saved since some IV invalid\n"
+        else if not !g_all_valid then
+          Printf.eprintf "No lss saved since some G invalid\n"
         else if (self#check_dup_lss (ivt, gt, bdt, geip)) then 
           Printf.eprintf "lss already exist, ignore\n"
         else
@@ -1151,11 +1164,11 @@ class dynamic_cfg (eip : int64) = object(self)
         | None -> false
         | Some l  -> l#is_iv_cond cond
 
-  method add_g g check simplify =
+  method add_g g check simplify query_unique_value =
     let loop = self#get_current_loop in
       match loop with
         | None -> ()
-        | Some l  -> l#add_g g check simplify 
+        | Some l  -> l#add_g g check simplify query_unique_value
 
   method add_bd eip b = 
     let loop = self#get_current_loop in
