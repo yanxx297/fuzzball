@@ -16,6 +16,7 @@ open Granular_memory;;
 open Fragment_machine;;
 open Decision_tree;;
 open Sym_path_frag_machine;;
+open Exec_assert_minder;;
 
 module SymRegionFragMachineFunctor =
   functor (D : DOMAIN) ->
@@ -100,6 +101,8 @@ struct
 	| V.BinOp((V.EQ|V.NEQ|V.LT|V.LE|V.SLT|V.SLE), _, _) -> 1
 	| V.BinOp(V.LSHIFT, e1, V.Constant(V.Int(_, v))) ->
 	    clamp_high ((loop e1) + (Int64.to_int v))
+	| V.BinOp(V.RSHIFT, e1, V.Constant(V.Int(_, v))) ->
+	    max 0 ((loop e1) - (Int64.to_int v))
 	| V.BinOp(_, _, _) ->
 	    V.bits_of_width (Vine_typecheck.infer_type_fast e)
 	| V.Ite(_, te, fe) -> max (loop te) (loop fe)
@@ -260,7 +263,7 @@ struct
     let rec loop e =
       match e with
 	| V.BinOp(V.PLUS, e1, e2) -> (loop e1) @ (loop e2)
-(*	| V.BinOp(V.BITAND, e, V.Constant(V.Int(ty, v)))
+	| V.BinOp(V.BITAND, e, V.Constant(V.Int(ty, v)))
 	    when is_high_mask ty v ->
 	    (* x & 0xfffffff0 = x - (x & 0xf), etc. *)
 	    (loop e) @
@@ -268,30 +271,6 @@ struct
 		 (V.UnOp(V.NEG,
 			 V.BinOp(V.BITAND, e,
 				 V.UnOp(V.NOT, V.Constant(V.Int(ty, v)))))))
-	| V.BinOp(V.BITOR, e1, e2) ->
-	    let w1 = narrow_bitwidth form_man e1 and
-		w2 = narrow_bitwidth form_man e2 in
-(* 	      Printf.printf "In %s (OR) %s, widths are %d and %d\n" *)
-(* 		(V.exp_to_string e1) (V.exp_to_string e2) w1 w2; *)
-	      if min w1 w2 <= 8 then
-		(* x | y = x - (x & m) + ((x & m) | y)
-		   where m is a bitmask >= y. *)
-		let (e_x, e_y, w) = 
-		  if w1 < w2 then
-		    (e2, e1, w1)
-		  else
-		    (e1, e2, w2)
-		in
-		  assert(w >= 0); (* x & 0 should have been optimized away *)
-		  let mask = Int64.pred (Int64.shift_left 1L w) in
-		  let ty_y = Vine_typecheck.infer_type None e_y in
-		  let masked = V.BinOp(V.BITAND, e_x,
-				       V.Constant(V.Int(ty_y, mask))) in
-		    (loop e_x) @ 
-		      [V.UnOp(V.NEG, masked);
-		       V.BinOp(V.BITOR, masked, e_y)]
-	      else
-		[e] *)
 	| V.Lval(V.Temp(var)) ->
 	    FormMan.if_expr_temp form_man var
 	      (fun e' -> loop e') [e] (fun v -> ())
@@ -355,6 +334,9 @@ struct
       | e when (narrow_bitwidth form_man e)
 	  < (narrow_bitwidth_cutoff ())
 	  -> ExprOffset(e)
+      | V.Cast(V.CAST_SIGNED, _, x)
+	  when (narrow_bitwidth form_man x) < (narrow_bitwidth_cutoff ())
+	    -> ExprOffset(e)
       | e when (narrow_bitwidth_signed form_man e)
 	  < (narrow_bitwidth_cutoff ())
 	  -> ExprOffset(e)
@@ -470,12 +452,12 @@ struct
 	  let (cbase, terms) = classify_terms_simple e form_man in
 	  let cbases = if cbase = 0L then [] else [cbase] in
 	    if !opt_trace_sym_addr_details then
-	      Printf.printf "Extracted base address 0x%0Lx from %s\n"
+	      Printf.eprintf "Extracted base address 0x%0Lx from %s\n"
 		cbase (V.exp_to_string e);
 	    (cbases, [], terms, [], [])
       | (_, _) ->
 	  if !opt_trace_sym_addr_details then
-	    Printf.printf "Analyzing addr expr %s\n" (V.exp_to_string e);
+	    Printf.eprintf "Analyzing addr expr %s\n" (V.exp_to_string e);
 	let l = List.map (classify_term form_man if_weird)
 	  (split_terms e form_man) in
 	  let (cbases, coffs, eoffs, ambig, syms) =
@@ -558,7 +540,7 @@ struct
 	let new_region = self#fresh_region in
 	  Hashtbl.replace region_vals e new_region;
 	  if !opt_trace_regions then
-	    Printf.printf "Address %s is region %d\n"
+	    Printf.eprintf "Address %s is region %d\n"
 	      (V.exp_to_string e) new_region;
 	  new_region
 
@@ -635,7 +617,7 @@ struct
 	     Hashtbl.replace concrete_cache e bits;
 	     (bits, "Picked")) in
 	if !opt_trace_sym_addrs then
-	  Printf.printf "%s concrete value 0x%Lx for %s\n"
+	  Printf.eprintf "%s concrete value 0x%Lx for %s\n"
 	    verb bits (V.exp_to_string e);
 	self#add_to_path_cond (V.BinOp(V.EQ, e, (const bits)));
 	bits
@@ -649,9 +631,9 @@ struct
 	       valuable optimization, but the way we do the check is
 	       brittle to t-variable creation. *)
 	    if cty <> ty then
-	      Printf.printf "Cast type is not %s in concretize_inner of %s\n"
+	      Printf.eprintf "Cast type is not %s in concretize_inner of %s\n"
 		(V.type_to_string ty) (V.exp_to_string e);
-	    assert(cty = ty);
+	    g_assert(cty = ty) 100 "Sym_region_frag_machine.concretize_inner";
 	    let ty2 = Vine_typecheck.infer_type None e2 in
 	    let bits = self#choose_conc_offset_cached ty2 e2 ident in
 	    let expand =
@@ -670,27 +652,147 @@ struct
 	| _ -> self#choose_conc_offset_cached ty e ident
 
     method private concretize ty e ident =
-      dt#start_new_query;
-      let v = self#concretize_inner ty e ident in
-	dt#count_query;
-	v
+      if !opt_concrete_path then
+	form_man#eval_expr e
+      else
+	(dt#start_new_query;
+	 self#note_first_branch;
+	 let v = self#concretize_inner ty e ident in
+	   dt#count_query;
+	   v)
 
     val mutable sink_read_count = 0L
 
+    val mutable call_stack = []
+    val ret_addrs = Hashtbl.create 101
+
+    (* TODO: avoid code duplication with FM.trace_callstack *)
+    method private update_ret_addrs last_insn last_eip eip =
+      let pop_callstack esp =
+	while match call_stack with
+	  | (old_esp, _, _, _) :: _ when old_esp < esp -> true
+	  | _ -> false
+	do
+	      match call_stack with
+		| (ret_addr_addr, _, _, _) :: _ ->
+		    Hashtbl.remove ret_addrs ret_addr_addr;
+		    call_stack <- List.tl call_stack
+		| _ -> failwith "Can't happen, loop invariant"
+	done
+      in
+      let get_retaddr esp =
+	match !opt_arch with
+	  | X86 -> self#load_word_conc esp
+	  | X64 -> self#load_long_conc esp
+	  | ARM -> self#get_word_var R14
+      in
+      let kind =
+	match !opt_arch with
+	  | X86 | X64 ->
+	      let s = last_insn ^ "        " in
+		if (String.sub s 0 4) = "call" &&
+		  (Int64.sub eip last_eip) <> 5L then
+		  "call"
+		else if (String.sub s 0 3) = "ret" then
+		  "return"
+		else if (String.sub s 0 8) = "repz ret" then
+		  "return"
+		else if (String.sub s 0 3) = "jmp" then
+		  "unconditional jump"
+		else if (String.sub s 0 1) = "j" then
+		  "conditional jump"
+		else
+		  "not a jump"
+	  | ARM ->
+	      (* TODO: add similar parsing for ARM mnemonics *)
+	      "not a jump"
+      in
+	match kind with
+	  | "call" ->
+	      let esp = self#get_esp in
+	      let ret_addr_addr = match !opt_arch with
+		| X86 -> esp
+		| X64 -> esp
+		| ARM -> failwith "Return address tracking not implemented for ARM"
+	      in
+	      let ret_addr = get_retaddr esp
+	      in
+		call_stack <- (esp, last_eip, eip, ret_addr) :: call_stack;
+		Hashtbl.replace ret_addrs ret_addr_addr ret_addr;
+	  | "return" ->
+	      let esp = self#get_esp in
+		pop_callstack esp;
+	  | _ -> ()
+
+    method private callstack_json =
+      let json_addr i64 = `String (Printf.sprintf "0x%08Lx" i64)
+      in
+	`List (List.map
+		 (fun (esp, last_eip, eip, ret_addr) ->
+		    `Assoc
+		      ["esp", json_addr esp;
+		       "last_eip", json_addr last_eip;
+		       "eip", json_addr eip;
+		       "ret_addr", json_addr ret_addr]
+		 ) call_stack)
+
+    method set_pointer_management pm =
+      spfm#set_pointer_management pm;
+      pm#set_reporter
+	(fun l ->
+	   List.iter (fun (a, b) -> self#add_event_detail a b) l;
+	   self#add_event_detail "call-stack" self#callstack_json;
+	   self#finalize_event
+	)
+
+    val check_cond_cache = Hashtbl.create 101
+
     method private check_cond cond_e ident =
-      dt#start_new_query_binary;
-      let choices = ref None in 
-	self#restore_path_cond
-	  (fun () ->
-	     let b = self#extend_pc_random cond_e false ident in
-	       choices := dt#check_last_choices;
-	       dt#count_query;
-	       ignore(b));
-	!choices
+      let tristate_str = function
+	| None -> "?"
+	| Some true -> "T"
+	| Some false -> "F"
+      in
+      let try_cond e =
+	if !opt_trace_decisions then
+	  Printf.eprintf "Checking %s:\n" (V.exp_to_string e);
+	let (is_sat, _) = self#query_with_path_cond e true in
+	  is_sat
+      in
+	if !opt_concrete_path then
+	  let b = (form_man#eval_expr cond_e) <> 0L in
+	    if !opt_trace_conditions then 
+              Printf.eprintf "Computed concrete value %b\n" b;
+	    Some b
+	else
+	  let key = (cond_e, dt#get_hist_str) in
+	    try
+	      let choices = Hashtbl.find check_cond_cache key in
+		if !opt_trace_decisions then
+		  Printf.eprintf "Reusing cached condition result %s for %s\n"
+		    (tristate_str choices) (V.exp_to_string cond_e);
+		choices
+	    with Not_found ->
+	      let can_be_true = try_cond cond_e and
+		  can_be_false = try_cond (V.UnOp(V.NOT, cond_e)) in
+	      let choices = match (can_be_true, can_be_false) with
+		| (true, false) -> Some true
+		| (false, true) -> Some false
+		| (true, true) -> None
+		| (false, false) ->
+		    failwith "Double unsat in check_cond"
+	      in
+		Hashtbl.replace check_cond_cache key choices;
+		choices
 
     method private handle_weird_addr_expr e =
       if !opt_stop_on_weird_sym_addr || !opt_finish_on_weird_sym_addr then
-	(if !opt_finish_on_weird_sym_addr then
+	(self#add_event_detail "tag" (`String ":weird-sym-addr");
+	 self#add_event_detail "addr-expr"
+	   (`String (V.exp_to_string e));
+	 self#add_event_detail "call-stack" self#callstack_json;
+	 self#finalize_event;
+	 if !opt_finish_on_weird_sym_addr then
 	   (self#finish_fuzz "weird symbolic-controlled address";
 	    ExprOffset(e))
 	 else
@@ -706,38 +808,56 @@ struct
 	   self#check_cond (V.BinOp(V.EQ, e, addr_const 0L))
 	     (0x3100 + self#get_stmt_num)
 	 with
-	   | Some true -> Printf.printf "Can be null.\n"
-	   | Some false -> Printf.printf "Cannot be null.\n"
-	   | None -> Printf.printf "Can be null or non-null\n";
-	       infl_man#maybe_measure_influence_deref e);
+	   | Some false -> Printf.eprintf "Cannot be null.\n"
+	   | (Some true|None) as maybe ->
+	       (match maybe with
+		  | Some true -> 
+		      Printf.eprintf "Can be null.\n";
+		  | (None|_) ->
+		      Printf.eprintf "Can be null or non-null\n";
+		      infl_man#maybe_measure_influence_deref e);
+	       self#add_event_detail "tag" (`String ":null-deref");
+	       self#add_event_detail "subtag" (`String ":symbolic-can-be-0");
+	       self#add_event_detail "can-be-null-expr"
+		 (`String (V.exp_to_string e));
+	       self#add_event_detail "call-stack" self#callstack_json;
+	       self#finalize_event;
+	       if !opt_finish_on_null_deref then
+		 self#finish_fuzz "symbolic dereference can be null"
+	);
       (* This start_new_query is needed because the selection of a
 	 base address with random_case_split and the concretization of
 	 offsets may create decision tree nodes. It should match with a
 	 call to dt#count_query at every return from this method. *)
       dt#start_new_query;
+      self#note_first_branch;
       let (cbases, coffs, eoffs, ambig, syms) =
 	classify_terms e form_man self#handle_weird_addr_expr in
       let eoffs = List.map simplify_fp eoffs in
 	if !opt_trace_sym_addr_details then
-	  (Printf.printf "Concrete base terms: %s\n"
+	  (Printf.eprintf "Concrete base terms: %s\n"
 	     (String.concat "; "
 		(List.map (Printf.sprintf "0x%08Lx") cbases));
-	   Printf.printf "Concrete offset terms: %s\n"
+	   Printf.eprintf "Concrete offset terms: %s\n"
 	     (String.concat "; "
 		(List.map (Printf.sprintf "0x%08Lx") coffs));
-	   Printf.printf "Offset expression terms: %s\n"
+	   Printf.eprintf "Offset expression terms: %s\n"
 	     (String.concat "; "
 		(List.map V.exp_to_string eoffs));
-	   Printf.printf "Ambiguous expression terms: %s\n"
+	   Printf.eprintf "Ambiguous expression terms: %s\n"
 	     (String.concat "; "
 		(List.map V.exp_to_string ambig));
-	   Printf.printf "Ambiguous symbol terms: %s\n"
+	   Printf.eprintf "Ambiguous symbol terms: %s\n"
 	     (String.concat "; "
 		(List.map V.exp_to_string syms)));
 	let cbase = List.fold_left Int64.add 0L cbases in
-	let (base, base_e, off_syms) =
+	let (base, base_e, off_syms) = 
           match (cbase, syms, ambig, !opt_no_sym_regions) with
-	  | (0L, [], [], false) -> raise NullDereference
+	  | (0L, [], [], false) -> raise
+	    (NullDereference
+	       { eip_of_deref = self#get_eip;
+		 last_set_to_null = Int64.sub Int64.zero Int64.one;
+		 addr_derefed =  Int64.sub Int64.zero Int64.one; })
 	  (* The following two cases are applicable when applying
 	     table treatment for symbolic regions *)
 	  | (0L, [], [e], false) -> (Some(self#region_for e), Some e, [])
@@ -763,7 +883,7 @@ struct
 			 (!split_count + 0x100 + ident))
 	      in
 		if !opt_trace_sym_addrs then
-		  Printf.printf "Choosing %s as the base address\n"
+		  Printf.eprintf "Choosing %s as the base address\n"
 		    (V.exp_to_string bvar);
 		(Some(self#region_for bvar), Some bvar, rest_vars @ ambig)
 	  | (off, vl, _, _) ->
@@ -777,7 +897,7 @@ struct
 	    when List.exists (fun (r', _) -> r = r') sink_regions ->
 	  let (r', size) =
 	    List.find (fun (r', _) -> r = r') sink_regions in
-	  Printf.printf "Ignoring access to sink region\n";
+	  Printf.eprintf "Ignoring access to sink region\n";
 	  (let sat_dir = ref false in
 	   self#restore_path_cond
 	     (fun () ->
@@ -785,9 +905,9 @@ struct
 		 (V.BinOp(V.LT, e, addr_const size))
 		 false (ident + 0x600));
 	   if !sat_dir = true then
-	     Printf.printf "Can be in bounds.\n"
+	     Printf.eprintf "Can be in bounds.\n"
 	   else
-	     Printf.printf "Can be out of bounds.\n");
+	     Printf.eprintf "Can be out of bounds.\n");
 	  sink_read_count <- Int64.add sink_read_count 0x10L;
 	  dt#count_query;
 	  SingleLocation(None, sink_read_count)
@@ -802,7 +922,7 @@ struct
 		| _ -> "concrete base"
 	      in
 		if !opt_trace_tables then
-		  Printf.printf
+		  Printf.eprintf
 		    "Table treatment for %s and offset expr = %s\n"
 		    base_str (V.exp_to_string off_expr);
 		dt#count_query;
@@ -831,19 +951,19 @@ struct
 	  | [] ->
 	      let a = form_man#eval_expr e in
 		if !opt_trace_sym_addrs then
-		  Printf.printf "Computed concrete value 0x%08Lx\n" a;
+		  Printf.eprintf "Computed concrete value 0x%08Lx\n" a;
 		if !opt_solve_path_conditions then
 		  (let cond = V.BinOp(V.EQ, e, addr_const a)
 		   in
 		   let sat = self#extend_pc_known cond false ident true in
-		     assert(sat));
+		     g_assert(sat) 100 "Sym_region_frag_machine.eval_addr_exp_region_conc_path");
 		(Some 0, a)
 	  | [V.Lval(V.Temp(var)) as vexp] ->
 	      let sum = sum_list rest in
 	      let a = form_man#eval_expr sum in
 	      let a_const = addr_const a in
 		if !opt_trace_sym_addrs then
-		  Printf.printf
+		  Printf.eprintf
 		    "Computed concrete offset %s + 0x%08Lx\n" 
 		    (V.var_to_string var) a;
 		if !opt_solve_path_conditions && 
@@ -853,7 +973,7 @@ struct
 		   let sat = self#extend_pc_known cond false
 		     (ident + 0x400) true
 		   in
-		     assert(sat));
+		     g_assert(sat) 100 "Sym_region_frag_machine.eval_addr_exp_region_conc_path");
 		(Some(self#region_for vexp), a)
 	  | [_] -> failwith "known_base invariant failure"
 	  | _ -> failwith "multiple bases"
@@ -870,7 +990,7 @@ struct
 	  let e = to_symbolic v in
 	  let eip = self#get_eip in
 	    if !opt_trace_sym_addrs then
-	      Printf.printf "Symbolic address %s @ (0x%Lx)\n"
+	      Printf.eprintf "Symbolic address %s @ (0x%Lx)\n"
 		(V.exp_to_string e) eip;
 	    if !opt_concrete_path then
 	      let (r, addr) = self#eval_addr_exp_region_conc_path e ident in
@@ -881,28 +1001,69 @@ struct
     (* Because we override handle_{load,store}, this should only be
        called for jumps. *)
     method eval_addr_exp exp =
-      match (self#eval_addr_exp_region exp 0xa000 (fun _ _ -> None)) with
-      | SingleLocation(r, addr) ->
-	(match r with
-	  | Some 0 -> addr
-	  | Some r_num ->
-	      if !opt_trace_stopping then
-		(Printf.printf "Unsupported jump into symbolic region %d\n"
-		   r_num;
-                 if !opt_trace_end_jump = (Some self#get_eip) then
-                   let e = D.to_symbolic_32 (self#eval_int_exp_simplify exp) in
-                   let (cbases, coffs, eoffs, ambig, syms) =
-                     classify_terms e form_man self#handle_weird_addr_expr in
-	             if cbases = [] && coffs = [] && eoffs = [] &&
-                       ambig = [] && syms <> [] then
-                       Printf.printf "Completely symbolic load\n");
-	      raise SymbolicJump
-	  | None ->
-	      if !opt_trace_stopping then
-		Printf.printf "Unsupported jump into sink region\n";
-	      raise SymbolicJump)
-      | TableLocation(r, off_expr, cloc) -> 
-	failwith "no table support for jumps, panic!"
+      let v = self#eval_int_exp_simplify exp in
+      let (to_concrete, to_symbolic) = match !opt_arch with
+	| (X86|ARM) -> (D.to_concrete_32, D.to_symbolic_32)
+	| X64       -> (D.to_concrete_64, D.to_symbolic_64)
+      in
+	try
+	  to_concrete v
+	with NotConcrete _ ->
+	  let e = to_symbolic v in
+	  let eip = self#get_eip in
+	    if !opt_trace_sym_addrs then
+	      Printf.eprintf "Symbolic jump address %s @ (0x%Lx)\n"
+		(V.exp_to_string e) eip;
+	    List.iter
+	      (fun target ->
+		 match
+		   let targ_c = V.Constant(V.Int(V.REG_32, target)) in
+		     self#check_cond (V.BinOp(V.EQ, e, targ_c)) 0xa000
+		 with
+		   | (None|Some true) ->
+		       Printf.eprintf "Symbolic jump can be 0x%Lx.\n" target;
+		       self#add_event_detail "tag"
+			 (`String ":controlled-jump");
+		       self#add_event_detail "subtag" 
+			 (`String ":symbolic-can-be-chosen");
+		       self#add_event_detail "can-be-chosen-expr"
+			 (`String (V.exp_to_string e));
+		       self#add_event_detail "chosen-value"
+			 (`String (Printf.sprintf "0x%Lx" target));
+		       self#add_event_detail "call-stack" self#callstack_json;
+		       self#finalize_event;
+		       if !opt_finish_on_controlled_jump then
+			 self#finish_fuzz "controlled jump"
+		   | Some false ->
+		       Printf.eprintf "Symbolic jump cannot be 0x%Lx.\n" target)
+	      !opt_check_for_jump_to;
+	    let (r, addr) = 
+	      if !opt_concrete_path then
+		self#eval_addr_exp_region_conc_path e 0xa000
+	      else
+		match self#region_expr e 0xa000 (fun _ _ -> None) with
+		  | SingleLocation(r, addr) -> (r, addr)
+		  | TableLocation(_,_,_) ->
+		      failwith "no table support for jumps, panic!"
+	    in
+	      match r with
+		| Some 0 -> addr
+		| Some r_num ->
+		    if !opt_trace_stopping then
+		      (Printf.eprintf
+			 "Unsupported jump into symbolic region %d\n" r_num;
+                       if !opt_trace_end_jump = (Some self#get_eip) then
+                         let e = to_symbolic (self#eval_int_exp_simplify exp) in
+                         let (cbases, coffs, eoffs, ambig, syms) =
+                           classify_terms e form_man self#handle_weird_addr_expr in
+	                   if cbases = [] && coffs = [] && eoffs = [] &&
+                             ambig = [] && syms <> [] then
+                             Printf.eprintf "Completely symbolic load\n");
+		    raise SymbolicJump
+		| None ->
+		    if !opt_trace_stopping then
+		      Printf.eprintf "Unsupported jump into sink region\n";
+		    raise SymbolicJump
 
     method private register_num reg =
       match reg with
@@ -930,7 +1091,7 @@ struct
       with NotConcrete _ ->
 	let e = D.to_symbolic_32 v in
 	  if do_influence then 
-	    (Printf.printf "Measuring symbolic %s influence..." name;
+	    (Printf.eprintf "Measuring symbolic %s influence..." name;
 	     infl_man#measure_point_influence name e);
 	  self#concretize V.REG_32 e (0x5000 + 0x100 * (self#register_num reg))
 
@@ -940,7 +1101,7 @@ struct
       with NotConcrete _ ->
 	let e = D.to_symbolic_64 v in
 	  if do_influence then
-	    (Printf.printf "Measuring symbolic %s influence..." name;
+	    (Printf.eprintf "Measuring symbolic %s influence..." name;
 	     infl_man#measure_point_influence name e);
 	  self#concretize V.REG_64 e (0x5000 + 0x100 * (self#register_num reg))
 
@@ -950,7 +1111,7 @@ struct
       with NotConcrete _ ->
 	let e = D.to_symbolic_64 v in
 	  if do_influence then
-	    (Printf.printf "Measuring symbolic %s influence..." name;
+	    (Printf.eprintf "Measuring symbolic %s influence..." name;
 	     infl_man#measure_point_influence name e);
 	  self#concretize V.REG_64 e 0x6800
 
@@ -960,7 +1121,7 @@ struct
       with NotConcrete _ ->
 	let e = D.to_symbolic_32 v in
 	  if do_influence then 
-	    (Printf.printf "Measuring symbolic %s influence..." name;
+	    (Printf.eprintf "Measuring symbolic %s influence..." name;
 	     infl_man#measure_point_influence name e);
 	  self#concretize V.REG_32 e 0x6400
 
@@ -970,7 +1131,7 @@ struct
       with NotConcrete _ ->
 	let e = D.to_symbolic_16 v in
 	  if do_influence then 
-	    (Printf.printf "Measuring symbolic %s influence..." name;
+	    (Printf.eprintf "Measuring symbolic %s influence..." name;
 	     infl_man#measure_point_influence name e);
 	  Int64.to_int (self#concretize V.REG_16 e 0x6200)
 
@@ -980,7 +1141,7 @@ struct
       with NotConcrete _ ->
 	let e = D.to_symbolic_8 v in
 	  if do_influence then 
-	    (Printf.printf "Measuring symbolic %s influence..." name;
+	    (Printf.eprintf "Measuring symbolic %s influence..." name;
 	     infl_man#measure_point_influence name e);
 	  Int64.to_int (self#concretize V.REG_8 e 0x6100)
 
@@ -1023,14 +1184,48 @@ struct
 	      -> (v1, (conc ty2 v2))
 	  | _ -> (v1, v2)
 
+    val mutable extra_store_hooks = []
+    val mutable last_set_null = Hashtbl.create 100
+
+    method add_extra_store_hook f = 
+	extra_store_hooks <- f :: extra_store_hooks
+	
+    method run_store_hooks s_addr size =
+	let apply_store_hook fn =
+	(fn s_addr size) in
+	List.iter apply_store_hook extra_store_hooks	
+	
     method private store_byte_region  r addr b =
-      (self#region r)#store_byte  addr b
+      (self#region r)#store_byte  addr b;
+      self#run_store_hooks addr 8
+
     method private store_short_region r addr s =
-      (self#region r)#store_short addr s
+      (self#region r)#store_short addr s;
+      self#run_store_hooks addr 16
+
     method private store_word_region  r addr w =
-      (self#region r)#store_word  addr w
+      (self#region r)#store_word  addr w;
+      if !opt_check_for_null then
+	(* if we're checking for nulls, I want to know when it was (potentially)
+	   introduced.  This code checks to see if the stored word might be null *)
+	begin
+	  let might_be_zero = 
+	    try (D.to_concrete_32 w) = Int64.zero
+	    with NotConcrete e ->
+	      match self#check_cond
+		(V.BinOp(V.EQ, e, V.Constant(V.Int(V.REG_32, 0L)))) 0x0000 with
+		| Some false -> false 
+		| Some true
+		| None -> true in
+	  if might_be_zero then
+	    (* if it is null, we keep track of it for later use. *)
+	    Hashtbl.replace last_set_null addr self#get_eip
+	end;
+      self#run_store_hooks addr 32
+
     method private store_long_region  r addr l =
-      (self#region r)#store_long  addr l
+      (self#region r)#store_long  addr l;
+      self#run_store_hooks addr 64
 
     method private load_byte_region  r addr = (self#region r)#load_byte  addr
     method private load_short_region r addr = (self#region r)#load_short addr
@@ -1049,7 +1244,7 @@ struct
       let wd_min = self#query_minval e ty in
       let new_e = V.BinOp(V.MINUS, e, V.Constant(V.Int(ty, wd_min))) in
       let rec loop min max =
-	assert(min <= max);
+	g_assert(min <= max)  100 "Sym_region_frag_machine.query_bitwidth";
 	if min = max then
 	  min
 	else
@@ -1059,7 +1254,7 @@ struct
 	  let cond_e = V.BinOp(V.LE, new_e, V.Constant(V.Int(ty, mask))) in
 	  let in_bounds = self#query_valid cond_e in
 	    if !opt_trace_tables then
-	      Printf.printf "(%s) <= 2**%d: %s\n" (V.exp_to_string new_e) mid
+	      Printf.eprintf "(%s) <= 2**%d: %s\n" (V.exp_to_string new_e) mid
 		(if in_bounds then "valid" else "invalid");
 	    if in_bounds then
 	      loop min mid
@@ -1069,7 +1264,7 @@ struct
       let max_wd = V.bits_of_width ty in
       let wd = loop 0 max_wd in
 	if !opt_trace_tables then
-	  Printf.printf "Bit width based on queries is %d\n" wd;
+	  Printf.eprintf "Bit width based on queries is %d\n" wd;
 	wd
 
     val bitwidth_cache = Hashtbl.create 101
@@ -1082,10 +1277,10 @@ struct
 	  None
 	else if fast_wd > !opt_table_limit then
 	  let slow_wd = self#query_bitwidth off_exp (reg_addr()) in
-	    assert(slow_wd <= fast_wd);
+	    g_assert(slow_wd <= fast_wd) 100 "Sym_region_frag_machine.decide_wd";
 	    if slow_wd > !opt_table_limit then
 	      (if !opt_trace_tables then
-		 Printf.printf
+		 Printf.eprintf
 		   ("%s with base %08Lx, offset %s of size 2**%d "
 		    ^^ "is not a table\n")
 		   op_name cloc (V.exp_to_string off_exp) slow_wd;
@@ -1102,7 +1297,7 @@ struct
 	    try
 	      let wd = Hashtbl.find bitwidth_cache key in
 		if !opt_trace_tables then
-		  Printf.printf "Reusing cached width %s for %s at [%s]\n%!"
+		  Printf.eprintf "Reusing cached width %s for %s at [%s]\n%!"
 		    (match wd with Some w -> string_of_int (Int64.to_int w)
 		       | None -> "[too big]")
 		    (V.exp_to_string off_exp) dt#get_hist_str;
@@ -1123,27 +1318,27 @@ struct
       let compute_wd off_exp =
 	if !opt_offset_limit = 0 then
 	  (if !opt_trace_offset_limit then
-	     Printf.printf "opt_offset_limit = 0\n";
+	     Printf.eprintf "opt_offset_limit = 0\n";
 	  Some 0)
 	else if fast_wd > !opt_offset_limit then
 	  let slow_wd = self#query_bitwidth off_exp (reg_addr()) in
 	    assert(slow_wd <= fast_wd);
 	    if slow_wd > !opt_offset_limit then
 	      (if !opt_trace_offset_limit then
-		 Printf.printf "Bits too large: %d\n" slow_wd;
+		 Printf.eprintf "Bits too large: %d\n" slow_wd;
 	      None)
 	    else
 	      (if !opt_trace_offset_limit then
-		 Printf.printf "Bits small enough: %d\n" slow_wd;
+		 Printf.eprintf "Bits small enough: %d\n" slow_wd;
 	      Some slow_wd)
 	else
 	  (if !opt_trace_offset_limit then
-	     Printf.printf "Bits small enough: %d\n" fast_wd;
+	     Printf.eprintf "Bits small enough: %d\n" fast_wd;
 	  Some fast_wd)
       in
         if fast_wd = 0 then
 	  (if !opt_trace_offset_limit then
-	     Printf.printf "fast_wd = 0\n";
+	     Printf.eprintf "fast_wd = 0\n";
 	  Some 0)
 	else
 	  let key = (off_exp, dt#get_hist_str) in
@@ -1151,9 +1346,9 @@ struct
 	      let wd = Hashtbl.find bitwidth_offset_cache key in
 	        if !opt_trace_offset_limit then	
 		  (match wd with
-		    | Some ubxd_wd -> Printf.printf
+		    | Some ubxd_wd -> Printf.eprintf
 		        "Loading small enough width: %d\n" ubxd_wd
-		    | None -> Printf.printf "Loading too large width\n");
+		    | None -> Printf.eprintf "Loading too large width\n");
 	        wd
 	    with Not_found ->
 	      let wd = compute_wd off_exp in
@@ -1162,7 +1357,7 @@ struct
 		    
     method private query_maxval e ty =
       let rec loop min max =
-	assert(min <= max);
+	g_assert(min <= max) 100 "Sym_region_frag_machine.query_maxval";
 	if min = max then
 	  min
 	else
@@ -1175,7 +1370,7 @@ struct
 	  let cond_e = V.BinOp(V.LE, e, V.Constant(V.Int(ty, mid))) in
 	  let in_bounds = self#query_valid cond_e in
 	    if !opt_trace_tables then
-	      Printf.printf "(%s) <= %Ld: %s\n" (V.exp_to_string e) mid
+	      Printf.eprintf "(%s) <= %Ld: %s\n" (V.exp_to_string e) mid
 		(if in_bounds then "valid" else "invalid");
 	    if in_bounds then
 	      loop min mid
@@ -1188,7 +1383,7 @@ struct
       assert(max_limit <> -1L);
       let limit = loop 0L max_limit in
 	if !opt_trace_tables then
-	  Printf.printf "Largest value based on queries is %Ld\n" limit;
+	  Printf.eprintf "Largest value based on queries is %Ld\n" limit;
 	limit
 
     method private query_minval e ty =
@@ -1232,7 +1427,7 @@ struct
 	  let maxval = self#query_maxval off_exp (reg_addr()) in
 	    if maxval > Int64.shift_left 1L !opt_table_limit then
 	      (if !opt_trace_tables then
-		 Printf.printf
+		 Printf.eprintf
 		   ("%s with base %08Lx, offset %s of size %Ld "
 		    ^^ "is not a table\n")
 		   op_name cloc (V.exp_to_string off_exp) maxval;
@@ -1248,7 +1443,7 @@ struct
 		try
 		  let limit = Hashtbl.find maxval_cache key in
 		    if !opt_trace_tables then
-		      Printf.printf ("Reusing cached maxval %Ld "
+		      Printf.eprintf ("Reusing cached maxval %Ld "
 				     ^^ "for %s at [%s]\n")
 			(match limit with Some l -> l | None -> -1L)
 			(V.exp_to_string off_exp) dt#get_hist_str;
@@ -1311,7 +1506,7 @@ struct
 	(num_ents - 1)
       in
         if !opt_trace_tables then
-	  Printf.printf
+	  Printf.eprintf
 	    "Load with base %08Lx, size 2**%d, stride %d, elt size %d"
 	    cloc idx_wd stride (V.bits_of_width ty);
         Some (form_man#make_table_lookup table idx_exp idx_wd ty)
@@ -1359,7 +1554,7 @@ struct
 	    load_sym_ent addr
 	in
 	  if !opt_trace_offset_limit then
-	    Printf.printf "Concretized load once to 0x%08Lx\n" addr;
+	    Printf.eprintf "Concretized load once to 0x%08Lx\n" addr;
 	  self#add_to_path_cond cond;
 	  Some value
 
@@ -1373,7 +1568,7 @@ struct
           | (None, Some jump_addr) when jump_addr = self#get_eip ->
 	      if cbases = [] && coffs = [] && eoffs = [] && ambig = [] &&
 	        syms <> [] then
-	        Printf.printf "Completely symbolic load\n";
+	        Printf.eprintf "Completely symbolic load\n";
 	      raise SymbolicJump
 	  | (None, _) ->
 	      self#concretize_once_and_load addr_e ty
@@ -1387,7 +1582,7 @@ struct
 	    
     method private handle_load addr_e ty =
       if !opt_trace_offset_limit then
-	Printf.printf "Loading from... %s\n" (V.exp_to_string addr_e);
+	Printf.eprintf "Loading from... %s\n" (V.exp_to_string addr_e);
       match self#maybe_table_or_concrete_load addr_e ty with
       | Some v -> (v, ty)
       | None ->
@@ -1408,7 +1603,7 @@ struct
               self#table_load cloc r off_expr (Int64.to_int wd) ty
 	    | (_, Some wd) ->
 	      if !opt_trace_tables then
-		Printf.printf 
+		Printf.eprintf
 		  "SRFM#handle_load table load for sym region with offset expr = %s\n"
 		  (V.exp_to_string off_expr);
 	      self#table_load 0L r off_expr (Int64.to_int wd) ty)
@@ -1428,18 +1623,24 @@ struct
 	in
 	(if !opt_trace_loads then
 	  (if !opt_trace_eval then
-	       Printf.printf "    "; (* indent to match other details *)
-	   Printf.printf "Load from %s "
+	       Printf.eprintf "    "; (* indent to match other details *)
+	   Printf.eprintf "Load from %s "
 	     (match !r' with
 		| None -> "sink"
 		| Some 0 -> "conc. mem"
 		| Some r_num -> "region " ^ (string_of_int r_num));
-	   Printf.printf "%08Lx = %s" !addr' (D.to_string_32 v);
+	   Printf.eprintf "%08Lx = %s" !addr' (D.to_string_32 v);
 	   (if !opt_use_tags then
-	      Printf.printf " (%Ld @ %08Lx)" (D.get_tag v) location_id);
-	   Printf.printf "\n"));
+	      Printf.eprintf " (%Ld @ %08Lx)" (D.get_tag v) location_id);
+	   Printf.eprintf "\n"));
 	if !r' = Some 0 && (Int64.abs (fix_s32 !addr')) < 4096L then
-	  raise NullDereference;
+	  raise (NullDereference
+		 { eip_of_deref = self#get_eip;
+		   last_set_to_null =
+		     (try
+		       Hashtbl.find last_set_null !addr'
+		      with Not_found -> Int64.sub Int64.zero Int64.one);
+		   addr_derefed = !addr';});
 	(v, ty)
 
     method private push_cond_prefer_true cond_v ident =
@@ -1452,6 +1653,7 @@ struct
 	  NotConcrete _ ->
 	    let e = D.to_symbolic_1 cond_v in
 	      (dt#start_new_query_binary;
+	       self#note_first_branch;
 	       let b = self#extend_pc_pref e true ident true in
 	       let choices = dt#check_last_choices in
 		 dt#count_query;
@@ -1482,7 +1684,7 @@ struct
       let byte_cond off v =
 	let (c_v, c_str) = self#target_region_byte off in
 	  if !opt_trace_target then
-	    Printf.printf
+	    Printf.eprintf
 	      "Store to target string offset %d: %s (vs '%s'):\n"
 	      off (D.to_string_8 v) c_str;
 	  D.eq8 v c_v
@@ -1500,7 +1702,7 @@ struct
 (* 	  (Int64.shift_left (Int64.of_int s2) 16) *)
 (* 	in *)
 (* 	  if !opt_trace_target then *)
-(* 	    Printf.printf *)
+(* 	    Printf.eprintf *)
 (* 	      "Store to target string offset %d: %s (vs 0x%08Lx): " *)
 (* 	      off (D.to_string_32 v) w; *)
 (* 	  D.eq32 v (D.from_concrete_32 w) *)
@@ -1587,7 +1789,7 @@ struct
     method private target_solve cond_v ident =
       let (b, choices) = self#push_cond_prefer_true cond_v ident in
 	if !opt_trace_target then
-	  Printf.printf "%s, %b\n"
+	  Printf.eprintf "%s, %b\n"
 	    (match choices with
 	       | Some true -> "known equal"
 	       | Some false -> "known mismatch"
@@ -1607,7 +1809,7 @@ struct
 	      (100000 * (offset + 1) / depth) + offset
 	    in
 	      if !opt_trace_guidance then
-		Printf.printf
+		Printf.eprintf
 		  "Achieved score %d with offset %d and depth %d\n"
 		  score offset depth;
 	      dt#set_heur score);
@@ -1618,13 +1820,13 @@ struct
 
     method private table_check_full_match all_match cloc maxval =
       if !opt_trace_target then
-	Printf.printf "Checking for full match: ";
+	Printf.eprintf "Checking for full match: ";
       match
 	self#push_cond_prefer_true (D.from_symbolic all_match) 0x9130
       with
 	| (_, Some true) ->
 	    if !opt_trace_target then
-	      Printf.printf "Must match.\n";
+	      Printf.eprintf "Must match.\n";
 	    (match (!opt_finish_on_target_match, !opt_target_region_start) with
 		 (true, Some addr)
 		   when addr = cloc &&
@@ -1633,10 +1835,10 @@ struct
 	       | _ -> ())
 	| (_, Some false) ->
 	    if !opt_trace_target then
-	      Printf.printf "Cannot match.\n"
+	      Printf.eprintf "Cannot match.\n"
 	| (_, None) ->
 	    if !opt_trace_target then
-	      Printf.printf "Can match.\n";
+	      Printf.eprintf "Can match.\n";
 	    if !opt_finish_on_target_match then
 	      self#finish_fuzz "target full match"
 
@@ -1682,14 +1884,14 @@ struct
 	      | _ -> ())
         done;
         if !opt_trace_tables then
-	  Printf.printf
+	  Printf.eprintf
 	    "Store with base %08Lx, size %d, stride %d %s"
 	    cloc num_ents stride "has symbolic address\n";
 	(if !target_conds <> [] then
 	   let any_match = disjoin !target_conds and
 	     all_match = conjoin !target_conds in
 	   if !opt_trace_target then
-	     Printf.printf "Checking for any match to target: ";
+	     Printf.eprintf "Checking for any match to target: ";
 	   ignore(self#target_solve (D.from_symbolic any_match) 0x9320);
 	   self#table_check_full_match all_match cloc maxval);
 	true
@@ -1708,7 +1910,7 @@ struct
         let addr = form_man#eval_expr_from_ce ce addr_e in
         let cond = V.BinOp(V.EQ, addr_e, addr_const addr) in
 	  if !opt_trace_offset_limit then
-	    Printf.printf "Concretized store once to 0x%08Lx\n" addr;
+	    Printf.eprintf "Concretized store once to 0x%08Lx\n" addr;
           store_ent addr value;
 	  Hashtbl.replace used_addr_cache addr true;
 	  self#add_to_path_cond cond;
@@ -1729,10 +1931,99 @@ struct
 	  match self#decide_maxval "Store" off_exp cloc with
 	    | None -> false
 	    | Some maxval -> self#table_store cloc (Some 0) off_exp e maxval ty value
-	  
+
+    method jump_hook last_insn last_eip eip =
+      spfm#jump_hook last_insn last_eip eip;
+      if !opt_check_for_ret_addr_overwrite then
+	self#update_ret_addrs last_insn last_eip eip
+
+    method private check_for_ret_addr_store addr_e ty =
+      if !opt_check_for_ret_addr_overwrite then
+	let size = (V.bits_of_width ty)/8 and
+	    ret_addr_size = match !opt_arch with
+	      | X86 -> 4
+	      | X64 -> 8
+	      | ARM -> 4
+	in
+	let v = self#eval_int_exp_simplify addr_e in
+	  try
+	    let addr = D.to_concrete_32 v in
+	      for offset = 1 - ret_addr_size to size - 1 do
+		let addr' = Int64.add addr (Int64.of_int offset) in
+		  if Hashtbl.mem ret_addrs addr' then
+		    (Printf.eprintf
+		       "Store to 0x%08Lx overwrites return address 0x%08Lx\n"
+		       addr' addr;
+		     self#add_event_detail "tag"
+		       (`String ":return-addr-overwrite");
+		     self#add_event_detail "subtag"
+		       (`String ":concrete-addr");
+		     self#add_event_detail "store-addr"
+		       (`String (Printf.sprintf "0x%08Lx" addr'));
+		     self#add_event_detail "ret-addr-addr"
+		       (`String (Printf.sprintf "0x%08Lx" addr));
+		     self#add_event_detail "call-stack" self#callstack_json;
+		     self#finalize_event;
+		     if !opt_finish_on_ret_addr_overwrite then
+		       self#finish_fuzz "return address overwrite")
+	      done
+	  with NotConcrete _ ->
+	    let e = D.to_symbolic_32 v in
+	      (* We want to signal a problem if there's any overlap
+		 between the store of size "size" and the return address
+		 of size say 4.  This will happen if the store adddress
+		 is the range (loc - size + 1) to (loc + 4 - 1)
+		 inclusive. With some algebra we can rewrite this to use
+		 only a single unsigned comparison:
+
+		 loc - size + 1 <= a <= loc + 4 - 1
+		 -size + 1 <= a - loc <= 4 - 1
+		 0 <= a - loc + size - 1 <= 4 + size - 2
+		 0 <= a - (loc - (size - 1)) <= 4 + size - 2
+	      *)
+	    let size_bound = Int64.of_int (ret_addr_size + size - 2) in
+	    let bound_c = V.Constant(V.Int(V.REG_32, size_bound)) in
+	      Hashtbl.iter
+		(fun loc _ ->
+		   let first_overlap =
+		     Int64.sub loc (Int64.of_int (size - 1))
+		   in
+		   let start_c = V.Constant(V.Int(V.REG_32, first_overlap)) in
+		   let overlap_cond = V.BinOp(V.LE,
+					      V.BinOp(V.MINUS, e, start_c),
+					      bound_c)
+		   in
+		     match 
+		       self#check_cond overlap_cond 0x0000
+		     with
+		       | (None|Some true) ->
+			   Printf.eprintf
+			     "Store to %s might overwrite return addr 0x%Lx.\n"
+			     (V.exp_to_string e) loc;
+			   self#add_event_detail "tag"
+			     (`String ":return-addr-overwrite");
+			   self#add_event_detail "subtag"
+			     (`String ":symbolic-addr");
+			   self#add_event_detail "store-addr-expr"
+			     (`String (V.exp_to_string e));
+			   self#add_event_detail "ret-addr-addr"
+			     (`String (Printf.sprintf "0x%08Lx" loc));
+			   self#add_event_detail "call-stack"
+			     self#callstack_json;
+			   self#finalize_event;
+			   if !opt_finish_on_ret_addr_overwrite then
+			     self#finish_fuzz "return address overwrite"
+		       | Some false ->
+			   Printf.eprintf
+			     "Store to %s cannot overwite 0x%Lx.\n" 
+			     (V.exp_to_string e) loc
+		)
+		ret_addrs
+
     method private handle_store addr_e ty rhs_e =
+      self#check_for_ret_addr_store addr_e ty;
       if !opt_trace_offset_limit then
-	Printf.printf "Storing to... %s\n" (V.exp_to_string addr_e);
+	Printf.eprintf "Storing to... %s\n" (V.exp_to_string addr_e);
       let value = self#eval_int_exp_simplify rhs_e in
       if (!opt_no_table_store) ||
 	not (self#maybe_table_or_concrete_store addr_e ty value)
@@ -1753,20 +2044,26 @@ struct
 	  | SingleLocation(r', addr') -> r := r'; addr := addr'; false
 	in
 	if !r = Some 0 && (Int64.abs (fix_s32 !addr)) < 4096L then
-	  raise NullDereference;
+	  raise (NullDereference
+		   { eip_of_deref = self#get_eip;
+		     last_set_to_null =
+		       (try
+			  Hashtbl.find last_set_null !addr
+			with Not_found -> Int64.sub Int64.zero Int64.one);
+		     addr_derefed = !addr;});
 	if !opt_trace_stores then
 	  if not (ty = V.REG_8 && !r = None) then
 	    (if !opt_trace_eval then
-	       Printf.printf "    "; (* indent to match other details *)
-	     Printf.printf "Store to %s "
+	       Printf.eprintf "    "; (* indent to match other details *)
+	     Printf.eprintf "Store to %s "
 	       (match !r with
 		  | None -> "sink"
 		  | Some 0 -> "conc. mem"
 		  | Some r_num -> "region " ^ (string_of_int r_num));
-	     Printf.printf "%08Lx = %s" !addr (D.to_string_32 value);
+	     Printf.eprintf "%08Lx = %s" !addr (D.to_string_32 value);
 	     (if !opt_use_tags then
-		Printf.printf " (%Ld @ %08Lx)" (D.get_tag value) location_id);
-	     Printf.printf "\n");
+		Printf.eprintf " (%Ld @ %08Lx)" (D.get_tag value) location_id);
+	     Printf.eprintf "\n");
 	(match (self#started_symbolic, !opt_target_region_start, !r) with
 	   | (true, Some from, Some 0) ->
 	       (match self#target_store_condition !addr from value ty with
@@ -1821,8 +2118,12 @@ struct
 	self#store_word_region (Some region) addr (D.from_concrete_32 v)
 
     method reset () =
+      let clear gm = gm#clear () in
       spfm#reset ();
-      List.iter (fun gm -> gm#clear ()) regions;
-      Hashtbl.clear concrete_cache
+      List.iter clear regions;
+      call_stack <- []; (* Todo: save on make_snap, restore here *)
+      Hashtbl.clear concrete_cache;
+      Hashtbl.clear ret_addrs;
+      Hashtbl.clear last_set_null
   end
 end

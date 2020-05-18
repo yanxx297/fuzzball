@@ -38,7 +38,7 @@ class stp_external_engine fname = object(self)
       filenum <- filenum + 1;
       curr_fname <- pick_fresh_fname dir fname filenum;
       if !opt_trace_solver then
-	Printf.printf "Creating STP file: %s.cvc\n" curr_fname;
+	Printf.eprintf "Creating STP file: %s.cvc\n" curr_fname;
       curr_fname
 
   method private chan =
@@ -88,7 +88,7 @@ class stp_external_engine fname = object(self)
       self#visitor#declare_var_value var rhs
     with
       | V.TypeError(err) ->
-	  Printf.printf "Typecheck failure on %s: %s\n"
+	  Printf.eprintf "Typecheck failure on %s: %s\n"
 	    (V.exp_to_string rhs) err;
 	  failwith "Typecheck failure in assert_eq"
 
@@ -137,21 +137,21 @@ class stp_external_engine fname = object(self)
     let cmd = !opt_solver_path ^ " " ^ timeout_opt ^ curr_fname
       ^ ".cvc >" ^ curr_fname ^ ".cvc.out" in
       if !opt_trace_solver then
-	Printf.printf "Solver command: %s\n" cmd;
+	Printf.eprintf "Solver command: %s\n" cmd;
       flush stdout;
       let rcode = Sys.command cmd in
       let results = open_in (curr_fname ^ ".cvc.out") in
 	if rcode <> 0 then
-	  (Printf.printf "STP died with result code %d\n" rcode;
+	  (Printf.eprintf "STP died with result code %d\n" rcode;
 	   (match rcode with 
 	      | 127 ->
 		  if !opt_solver_path = "stp" then
-		    Printf.printf
+		    Printf.eprintf
 		      "Perhaps you should set the -solver-path option?\n"
 		  else if String.contains !opt_solver_path '/' &&
 		    not (Sys.file_exists !opt_solver_path)
 		  then
-		    Printf.printf "The file %s does not appear to exist\n"
+		    Printf.eprintf "The file %s does not appear to exist\n"
 		      !opt_solver_path
 	      | 131 -> raise (Signal "QUIT")
 	      | _ -> ());
@@ -162,7 +162,7 @@ class stp_external_engine fname = object(self)
 	  let first_assert = (String.sub result_s 0 6) = "ASSERT" in
 	  let result = match result_s with
 	    | "Valid." -> Some true
-	    | "Timed Out." -> Printf.printf "STP timeout\n"; None
+	    | "Timed Out." -> Printf.eprintf "STP timeout\n"; None
 	    | "Invalid." -> Some false
 	    | _ when first_assert -> Some false
 	    | _ -> failwith "Unexpected first output line"
@@ -178,7 +178,7 @@ class stp_external_engine fname = object(self)
 
   method after_query save_results =
     if save_results then
-      Printf.printf "STP query and results are in %s.cvc and %s.cvc.out\n"
+      Printf.eprintf "STP query and results are in %s.cvc and %s.cvc.out\n"
 	curr_fname curr_fname
     else if not !opt_save_solver_files then
       (Sys.remove (curr_fname ^ ".cvc");

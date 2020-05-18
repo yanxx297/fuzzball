@@ -59,12 +59,13 @@ let start_solver solver =
 	     | Z3 -> "-t:" ^ (string_of_int s) ^ "000 "
 	     | MATHSAT -> failwith "No timeout option for mathsat")
   in
+  let extra_opt = extra_opt_options solver in
   let cmd =
     match solver with
-      | CVC4 -> path ^ " --lang smt -im " ^ timeout_opt
-      | STP_SMTLIB2 -> path ^ " --SMTLIB2 -p " ^ timeout_opt
-      | Z3 -> path ^ " -smt2 -in " ^ timeout_opt
-      | MATHSAT -> path ^ timeout_opt
+      | CVC4 -> path ^ " --lang smt -im " ^ timeout_opt ^ extra_opt
+      | STP_SMTLIB2 -> path ^ " --SMTLIB2 -p " ^ timeout_opt ^ extra_opt
+      | Z3 -> path ^ " -smt2 -in " ^ timeout_opt ^ extra_opt
+      | MATHSAT -> path ^ " " ^ timeout_opt ^ extra_opt
       | _ -> failwith "Unsupported solver in smtlib_external_engine"
   in
     Unix.open_process cmd
@@ -95,7 +96,7 @@ class smtlib_external_engine solver fname = object(self)
       filenum <- filenum + 1;
       curr_fname <- pick_fresh_fname dir fname filenum;
       if !opt_trace_solver then
-	Printf.printf "Creating SMTLIB2 log file: %s.smt2\n" curr_fname;
+	Printf.eprintf "Creating SMTLIB2 log file: %s.smt2\n" curr_fname;
       curr_fname
 
   val mutable log_chan = None
@@ -144,7 +145,7 @@ class smtlib_external_engine solver fname = object(self)
       self#visitor#declare_var_value var rhs
     with
       | V.TypeError(err) ->
-	  Printf.printf "Typecheck failure on %s: %s\n"
+	  Printf.eprintf "Typecheck failure on %s: %s\n"
 	    (V.exp_to_string rhs) err;
 	  failwith "Typecheck failure in assert_eq"
 
@@ -175,18 +176,14 @@ class smtlib_external_engine solver fname = object(self)
     let (solver_in, solver_out) = solver_chans in
       self#visitor#assert_exp qe;
       self#puts solver_out "(check-sat)\n";
-      if solver = MATHSAT then
-	for i = 1 to 8192 do
-	  output_char solver_out ' '
-	done;
       flush solver_out;
       self#flush_log;
       let result_s = input_line solver_in in
       let first_assert = (String.sub result_s 0 3) = "ASS" in
       let result = match result_s with
 	| "unsat" -> Some true
-	| "Timed Out." -> Printf.printf "STP timeout\n"; None
-	| "unknown" -> Printf.printf "Solver timeout\n"; None
+	| "Timed Out." -> Printf.eprintf "STP timeout\n"; None
+	| "unknown" -> Printf.eprintf "Solver timeout\n"; None
 	| "sat" -> Some false
 	| _ when first_assert -> Some false
 	| _ -> failwith ("Unexpected first output line " ^ result_s)
@@ -203,10 +200,6 @@ class smtlib_external_engine solver fname = object(self)
 	  (solver = CVC4 || solver = Z3 || solver = MATHSAT)
 	then
 	  (self#puts solver_out "(get-model)\n";
-	   if solver = MATHSAT then
-	     for i = 1 to 8192 do
-	       output_char solver_out ' '
-	     done;
 	   flush solver_out;
 	   self#flush_log;
 	   if solver = Z3 then
@@ -223,9 +216,9 @@ class smtlib_external_engine solver fname = object(self)
   method after_query save_results =
     if save_results then
       if !opt_save_solver_files then
-	Printf.printf "Solver queries are in %s\n" curr_fname
+	Printf.eprintf "Solver queries are in %s\n" curr_fname
       else
-	Printf.printf "Turn on -save-solver-files to save the query\n"
+	Printf.eprintf "Turn on -save-solver-files to save the query\n"
 
   method private reset_solver_chans =
     solver_chans <- start_solver solver

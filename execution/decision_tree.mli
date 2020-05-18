@@ -20,6 +20,7 @@ class virtual decision_tree : object
   method virtual random_bit : bool
   method virtual random_float : float
   method virtual random_byte : int
+  method virtual random_word : int64
   method virtual record_unsat : bool -> unit
 
   method virtual try_extend : (bool -> Vine.exp) ->
@@ -40,4 +41,5 @@ class virtual decision_tree : object
 
   method virtual measure_size : int
   method virtual print_tree : out_channel -> unit
+  method virtual print_dot : unit
 end

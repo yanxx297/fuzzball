@@ -6,6 +6,7 @@ module V = Vine;;
 
 open Exec_exceptions;;
 open Exec_options;;
+open Exec_assert_minder
 
 let rec constant_fold_rec e =
   match e with
@@ -187,9 +188,9 @@ let rec simplify_fp e =
   let rec loop e n =
     let e' = simplify_rec e in
       if !opt_trace_simplify && e <> e' then
-	Printf.printf "Simplified %s -> %s\n"
+	Printf.eprintf "Simplified %s -> %s\n"
 	  (V.exp_to_string e) (V.exp_to_string e');
-      assert(n < 100);
+      g_assert(n < 100) 100 "Frag_simplify.simplify_fp";
       if e = e' then
 	e'
       else
@@ -266,11 +267,13 @@ let rec cfold_with_type e =
 	     | V.PLUS | V.MINUS | V.TIMES
 	     | V.DIVIDE | V.SDIVIDE | V.MOD | V.SMOD
 	     | V.BITAND | V.BITOR | V.XOR
-		 -> assert(ty1 = ty2); ty1
+		 -> (g_assert(ty1 = ty2) 100 "Frag_simplify.cfold_with_type"; 
+		     ty1)
 	     | V.LSHIFT | V.RSHIFT | V.ARSHIFT
 		 -> ty1
 	     | V.EQ | V.NEQ | V.LT | V.LE | V.SLT | V.SLE
-		 -> assert(ty1 = ty2); V.REG_1
+		 -> g_assert(ty1 = ty2) 100 "Frag_simplify.cfold_with_type";
+		   V.REG_1
 	     | V.CONCAT -> assert(ty1 = ty2); V.double_width ty1)
 	in
 	  (V.BinOp(op, e1', e2'), ty)
@@ -280,9 +283,9 @@ let rec cfold_with_type e =
 	let ty =
 	  (match op with
 	     | V.FPLUS | V.FMINUS | V.FTIMES | V.FDIVIDE
-		 -> assert(ty1 = ty2); ty1
+		 -> g_assert(ty1 = ty2) 100 "Frag_simplify.cfold_with_type"; ty1
 	     | V.FEQ | V.FNEQ | V.FLT | V.FLE
-		 -> assert(ty1 = ty2); V.REG_1)
+		 -> g_assert(ty1 = ty2) 100 "Frag_simplify.cfold_with_type"; V.REG_1)
 	in
 	  (V.FBinOp(op, rm, e1', e2'), ty)
     | V.Constant(V.Int(ty, _)) -> (e, ty)
@@ -319,8 +322,8 @@ let rec cfold_with_type e =
 	    (te', ty_t) = cfold_with_type te and
 	    (fe', ty_f) = cfold_with_type fe
 	in
-	  assert(ty_c = V.REG_1);
-	  assert(ty_t = ty_f);
+	  g_assert(ty_c = V.REG_1) 100 "Frag_simplify.cfold_with_type";
+	  g_assert(ty_t = ty_f) 100 "Frag_simplify.cfold_with_type";
 	  (V.Ite(ce', te', fe'), ty_t)
 
 let cfold_exprs_w_type (dl, sl) =
@@ -487,10 +490,10 @@ let copy_const_prop (dl, sl) =
       | V.Lval(V.Mem(v, idx, ty)) ->
 	  V.Lval(V.Mem(v, replace_uses_e idx, ty))
       | V.Let(V.Temp(v), e1, e2) ->
-	  assert(not (V.VarHash.mem map v));
+	  g_assert(not (V.VarHash.mem map v)) 100 "Frag_simplify.copy_const_prop";
 	  V.Let(V.Temp(v), (replace_uses_e e1), (replace_uses_e e2))
       | V.Let(V.Mem(v, idx, mem_ty), e1, e2) ->
-	  assert(not (V.VarHash.mem map v));
+	  g_assert(not (V.VarHash.mem map v)) 100 "Frag_simplify.copy_const_prop";
 	  V.Let(V.Mem(v, (replace_uses_e idx), mem_ty),
 		(replace_uses_e e1), (replace_uses_e e2))
       | V.Ite(ce, te, fe) ->

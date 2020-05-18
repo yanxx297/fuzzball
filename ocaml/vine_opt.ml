@@ -342,6 +342,9 @@ let rec constant_fold ctx e =
 		  w3 = bits_of_width (Vine_typecheck.infer_type None e3) in
 		w1 <= (w2 - w3))
 	  -> Constant(Int(t1, 0L))
+    (* High bit preserved by CAST_SIGNED *)
+    | Cast(CAST_HIGH, REG_1, Cast(CAST_SIGNED, t2, e1))
+      -> Cast(CAST_HIGH, REG_1, e1) 
     (* U widen then S widen same as single U widen *)
     | Cast(CAST_SIGNED, t1, Cast(CAST_UNSIGNED, t2, e3))
 	when (let w2 = bits_of_width t2 and
@@ -434,6 +437,21 @@ let rec constant_fold ctx e =
 		  Constant(Int(_, 8L))))
 	when e1 = e2 && ((Vine_typecheck.infer_type None e1) = REG_8)
 	  -> Cast(CAST_SIGNED, REG_16, e1)
+    (* A combination of casts equivalent to sign extension *)
+    | BinOp(BITOR, Cast(CAST_UNSIGNED, REG_32, e1),
+	    BinOp(BITAND,
+		  Cast(CAST_SIGNED, REG_32, e1'),
+		  Constant(Int(REG_32, 0xffffff00L))))
+	when e1 = e1'
+	  -> Cast(CAST_SIGNED, REG_32, e1')
+    (* Low bits ORed inside a mask that discards them *)
+    | BinOp(BITAND,
+	    BinOp(BITOR, Cast(CAST_UNSIGNED, REG_32, e1), e2),
+	    Constant(Int(REG_32, 0xffffff00L)))
+	when (Vine_typecheck.infer_type None e1) = REG_8
+	  ->
+	BinOp(BITAND, e2,
+	      Constant(Int(REG_32, 0xffffff00L)))
     (* Impossible equalities with extension casts *)
     | BinOp(EQ, Cast(CAST_UNSIGNED, (REG_16|REG_32|REG_64), e1),
 	    Constant(Int(_, c)))

@@ -6,6 +6,7 @@ open Exec_utils
 open Exec_options
 open Fragment_machine
 open Linux_syscalls
+open Exec_assert_minder
 
 let opt_hwcap : int64 option ref = ref None
 
@@ -44,7 +45,9 @@ type program_header = {
   ph_flags : int64;
   align : int64
 }
-      
+
+let initial_break = ref None
+
 let seen_pc = ref false
 
 let check_single_start_eip pc =
@@ -83,7 +86,7 @@ let read_elf_header ic =
 	    ehsize = ehsize; phentsize = phentsize; phnum = phnum;
 	    shentsize = shentsize; shnum = shnum; shstrndx = shstrndx }
 	  in
-	    assert(eh.ehsize = 16 + 36);
+	    g_assert(eh.ehsize = 16 + 36) 100 "Linux_loader.read_elf_header";
 	    eh
       | ("\x7fELF\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00"|
          "\x7fELF\x02\x01\x01\x03\x00\x00\x00\x00\x00\x00\x00\x00") ->
@@ -107,12 +110,13 @@ let read_elf_header ic =
 	    ehsize = ehsize; phentsize = phentsize; phnum = phnum;
 	    shentsize = shentsize; shnum = shnum; shstrndx = shstrndx }
 	  in
-	    assert(eh.ehsize = 16 + 48);
+	    g_assert(eh.ehsize = 16 + 48) 100 "Linux_loader.read_elf_header";
 	    eh
       | _ ->
 	  failwith "Unrecognized identification bytes in ELF file"
 
 let read_program_headers ic eh =
+  g_assert(eh.phentsize = 32 || eh.phentsize = 56) 100 "Linux_loader.read_program_headers";
   assert(eh.phentsize = 32 || eh.phentsize = 56);
   seek_in ic (Int64.to_int eh.phoff);
   let i = IO.input_channel ic in
@@ -176,7 +180,7 @@ let load_segment fm ic phr virt_off is_main_prog =
   let partial = Int64.rem phr.filesz 0x1000L in
   let vbase = Int64.add phr.vaddr virt_off in
     if !opt_trace_setup then
-      Printf.printf "Loading %10s segment from %08Lx to %08Lx\n"
+      Printf.eprintf "Loading %10s segment from %08Lx to %08Lx\n"
 	type_str vbase
 	(Int64.add vbase phr.filesz);
     seek_in ic (Int64.to_int phr.offset);
@@ -194,7 +198,7 @@ let load_segment fm ic phr virt_off is_main_prog =
     if phr.memsz > phr.filesz && type_str = "data" then
       (* E.g., a BSS region. Zero fill to avoid uninit-value errors. *)
       (if !opt_trace_setup then
-	 Printf.printf "              Zero filling from %08Lx to %08Lx\n"
+	 Printf.eprintf "              Zero filling from %08Lx to %08Lx\n"
 	   (Int64.add vbase phr.filesz) (Int64.add vbase phr.memsz);
        let va = ref (Int64.add vbase phr.filesz) in
        let first_full = (Int64.logand (Int64.add !va 4095L)
@@ -218,13 +222,13 @@ let load_segment fm ic phr virt_off is_main_prog =
 	 let last_aligned = (Int64.logand (Int64.add !va 4095L)
 			       (Int64.lognot 4095L)) in
 	   if !opt_trace_setup then
-	     Printf.printf "        Extra zero filling from %08Lx to %08Lx\n"
+	     Printf.eprintf "        Extra zero filling from %08Lx to %08Lx\n"
 	       !va last_aligned;
 	   (if is_main_prog then
-	      match !linux_initial_break with 
-		| None -> linux_initial_break := Some last_aligned;
+	      match !initial_break with 
+		| None -> initial_break := Some last_aligned;
 		    if !opt_trace_setup then
-		      Printf.printf "Setting initial break to 0x%08Lx\n"
+		      Printf.eprintf "Setting initial break to 0x%08Lx\n"
 			last_aligned;
 		| _ -> ())	;
 	   let last_space = Int64.to_int (Int64.sub last_aligned !va) in
@@ -234,10 +238,10 @@ let load_partial_segment fm ic phr vbase size =
   let i = IO.input_channel ic in
   let file_base = Int64.sub vbase phr.vaddr in
     if !opt_trace_setup then
-      Printf.printf "Loading     extra region from %08Lx to %08Lx\n"
+      Printf.eprintf "Loading     extra region from %08Lx to %08Lx\n"
 	vbase (Int64.add vbase size);
-    assert(size <= 4096L);
-    assert((Int64.add file_base size) <= phr.filesz);
+    g_assert(size <= 4096L) 100 "Linux_loader.load_partial_segment";
+    g_assert((Int64.add file_base size) <= phr.filesz) 100 "Linux_loader.load_partial_segment";
     seek_in ic (Int64.to_int (Int64.add phr.offset file_base));
     let data = IO.really_nread i (Int64.to_int size) in
       store_page fm vbase data;
@@ -247,8 +251,8 @@ let load_ldso fm dso vaddr =
   let ic = open_in (chroot dso) in
   let dso_eh = read_elf_header ic in
     if !opt_trace_setup then
-      Printf.printf "Loading from dynamic linker %s\n" dso;
-    assert(dso_eh.eh_type = 3);
+      Printf.eprintf "Loading from dynamic linker %s\n" dso;
+    g_assert(dso_eh.eh_type = 3) 100 "Linux_loader.load_ldso";
     let phrs = read_program_headers ic dso_eh in
       (* If the loader already has a non-zero base address, disable
 	 our default offset. This can happen if it's prelinked. *)
@@ -262,15 +266,15 @@ let load_ldso fm dso vaddr =
       close_in ic;
       let r = Int64.add !vaddr dso_eh.entry in
 	if !opt_trace_setup then
-	  Printf.printf "Finished ldso loading, entry at 0x%08Lx\n" r;
+	  Printf.eprintf "Finished ldso loading, entry at 0x%08Lx\n" r;
 	r
 
 let load_x87_emulator fm emulator =
   let ic = open_in emulator in
   let eh = read_elf_header ic in
     if !opt_trace_setup then
-      Printf.printf "Loading from x87 emulator %s\n" emulator;
-    assert(eh.eh_type = 2);
+      Printf.eprintf "Loading from x87 emulator %s\n" emulator;
+    g_assert(eh.eh_type = 2) 100 "Linux_loader.load_x87_emulator";
     List.iter
       (fun phr ->
 	 if phr.ph_type = 1L || phr.memsz <> 0L then
@@ -279,7 +283,7 @@ let load_x87_emulator fm emulator =
     close_in ic;
     eh.entry
 
-let build_startup_state fm eh load_base ldso argv =
+let build_startup_state (fm : Fragment_machine.fragment_machine) eh load_base ldso argv =
   let esp = ref 0xc0000000L in
   let push_cstr s =
     esp := Int64.sub !esp (Int64.of_int ((String.length s) + 1));
@@ -317,20 +321,20 @@ let build_startup_state fm eh load_base ldso argv =
        (fun key -> 
 	  if Hashtbl.mem opt_extra_env key then
 	    (if !opt_trace_setup then
-	       Printf.printf "From command line, setting env. var %s to %s\n"
+	       Printf.eprintf "From command line, setting env. var %s to %s\n"
 		 key (Hashtbl.find opt_extra_env key);
 	     [key ^ "=" ^ (Hashtbl.find opt_extra_env key)])
 	  else
 	    try
 	      let v = Sys.getenv key in
 		if !opt_trace_setup then
-		  Printf.printf "From real env., setting env. var %s to %s\n"
+		  Printf.eprintf "From real env., setting env. var %s to %s\n"
 		    key v;
 		[key ^ "=" ^ v]
 	    with
 		Not_found -> 
 		  if !opt_trace_setup then
-		    Printf.printf "Skipping missing env. var %s\n" key;
+		    Printf.eprintf "Skipping missing env. var %s\n" key;
 		  [])
        env_keys)
   in
@@ -394,7 +398,7 @@ let build_startup_state fm eh load_base ldso argv =
       List.iter push_word (List.rev argv_locs);
       push_word (Int64.of_int (List.length argv)); (* argc *)
       if !opt_trace_setup then
-	Printf.printf "Initial stack pointer is 0x%08Lx\n" !esp;
+	Printf.eprintf "Initial stack pointer is 0x%08Lx\n" !esp;
       match !opt_arch with
 	| X86 -> fm#set_word_var R_ESP !esp
 	| ARM -> fm#set_word_var R13 !esp
@@ -416,11 +420,11 @@ let check_elf_arch e_machine do_setup =
       | _    -> ("",    X86, true)
   in
     if weird then
-      (Printf.printf "Unsupported e_machine architecture %d.\n" e_machine;
-       Printf.printf "FuzzBALL probably won't be able to run this binary.\n")
+      (Printf.eprintf "Unsupported e_machine architecture %d.\n" e_machine;
+       Printf.eprintf "FuzzBALL probably won't be able to run this binary.\n")
     else if !opt_arch <> expected_arch then
-      (Printf.printf "Binary does not match configured architecture.\n";
-       Printf.printf "Perhaps you should have used the -arch %s option?\n"
+      (Printf.eprintf "Binary does not match configured architecture.\n";
+       Printf.eprintf "Perhaps you should have used the -arch %s option?\n"
 	 expected_str;
        if do_setup then
 	 failwith "Refusing to continue with wrong architecture";)
@@ -460,10 +464,10 @@ let load_dynamic_program (fm : fragment_machine) fname load_base
     if !checked_load_base then
       ()
     else if addr <> load_base then
-      (Printf.printf "Unexpected first-segment load address.\n";
-       Printf.printf "Perhaps you need the -load-base 0x%Lx or -arch options\n"
+      (Printf.eprintf "Unexpected first-segment load address.\n";
+       Printf.eprintf "Perhaps you need the -load-base 0x%Lx or -arch options\n"
 	 addr;
-       assert(addr = load_base))
+       g_assert (addr = load_base) 100 "Linux_loader.load_dynamic_program 1")
     else
       checked_load_base := true
   in
@@ -472,9 +476,10 @@ let load_dynamic_program (fm : fragment_machine) fname load_base
     | 3 -> load_base (* shared object or PIE *)
     | _ -> failwith "Unhandled ELF object type"
   in
+    initial_break := None;
     check_elf_arch eh.machine do_setup;
     if !opt_trace_setup then
-      Printf.printf "Loading executable from %s\n" (chroot fname);
+      Printf.eprintf "Loading executable from %s\n" (chroot fname);
     entry_point := eh.entry;
     List.iter
       (fun phr ->
@@ -496,14 +501,15 @@ let load_dynamic_program (fm : fragment_machine) fname load_base
 	      if base >= phr.vaddr && 
 		base < (Int64.add phr.vaddr phr.memsz)
 	      then
-		(assert(Int64.add base size < Int64.add phr.vaddr phr.memsz);
+		(g_assert(Int64.add base size < Int64.add phr.vaddr phr.memsz) 100 "Linux_loader.load_dynamic_program";
 		 load_partial_segment fm ic phr base size))
 	   extras)
       (read_program_headers ic eh);
     close_in ic;
     if do_setup then
       build_startup_state fm eh load_base !ldso_base argv;
-    !entry_point
+    (!entry_point,
+     (match !initial_break with Some a -> a | None -> 0L))
 
 let addr_to_io fname addr =
   let ic = open_in (chroot fname) in
@@ -563,13 +569,13 @@ let read_core_note fm ic =
     | _ -> "unknown"
   in
     if !opt_trace_setup then
-      Printf.printf "Core note of size 0x%x, type 0x%Lx (%s), name %s\n"
+      Printf.eprintf "Core note of size 0x%x, type 0x%Lx (%s), name %s\n"
 	descsz ntype type_str name;
     (* The ELF spec seems at some places to suggest that the contents
        of notes will consist only of 4-bte values, but other parts of the
        spec suggest otherwise, and modern Linux seems to generate
        odd-sized NT_FILE notes. *)
-    (* assert(descsz mod 4 = 0); *)
+    (* g_assert(descsz mod 4 = 0) 100 "Linux_loader.read_core_note"; *)
     if name = "CORE" && ntype = 1L then
       (let si_signo = IO.read_i32 i in
        let si_code = IO.read_i32 i in
@@ -624,7 +630,7 @@ let read_core_note fm ic =
 let load_core (fm:fragment_machine) fname =
   let ic = open_in (chroot fname) in
   let eh = read_elf_header ic in
-    assert(eh.eh_type = 4);
+    g_assert(eh.eh_type = 4) 100 "Linux_loader.load_core";
     List.iter
       (fun phr ->
 	 if phr.ph_type = 1L then (* PT_LOAD *)
@@ -641,9 +647,9 @@ let load_core (fm:fragment_machine) fname =
 
 let setup_tls_segment (fm:fragment_machine) gdt tls_base =
   let gs_sel = fm#get_short_var R_GS in
-    assert(gs_sel land 7 = 3); (* global, ring 3 *)
+    g_assert(gs_sel land 7 = 3) 100 "Linux_loader.setup_tls_segment"; (* global, ring 3 *)
     linux_setup_tcb_seg fm (gs_sel asr 3) gdt tls_base 0xfffffL;
     (* If this is set up correctly, the first word in the TLS
        segment will be a pointer to itself. *)
     let read_tls_base = fm#load_word_conc tls_base in
-      assert(tls_base = read_tls_base);
+      g_assert(tls_base = read_tls_base) 100 "Linux_loader.setup_tls_segment";

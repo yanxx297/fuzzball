@@ -10,6 +10,7 @@ let opt_solver = ref "stp-external"
 let opt_solver_check_against = ref "none"
 
 let opt_smtlib_solver_type = ref None
+let opt_smtlib_solver_type_string = ref None (* for SIFT *)
 
 let solver_cmdline_opts =
   [
@@ -22,7 +23,8 @@ let solver_cmdline_opts =
     ("-stp-path", Arg.Set_string(opt_solver_path),
      "path Former name of -solver-path");
     ("-smtlib-solver-type", Arg.String
-       (function
+       (fun s -> opt_smtlib_solver_type_string := Some s;
+	match s with
 	  | "stp" -> opt_smtlib_solver_type := Some STP_SMTLIB2
 	  | "cvc4" -> opt_smtlib_solver_type := Some CVC4
 	  | "btor"|"boolector" -> opt_smtlib_solver_type := Some BOOLECTOR

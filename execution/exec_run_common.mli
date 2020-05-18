@@ -10,8 +10,25 @@ val label_to_eip : string -> int64
 val trans_cache : (int64, Vine.program) Hashtbl.t
 
 val with_trans_cache : int64 -> (unit -> Vine.program) -> Vine.program
+val some_none_trans_cache : int64 -> (unit -> Vine.program option) -> Vine.program option
 
 val print_insns : int64 -> Vine.program -> int64 option -> char -> unit
 
 val run_one_insn : Fragment_machine.fragment_machine -> Asmir.varctx -> int64
   -> char array -> int64
+
+val decode_insn_at : Fragment_machine.fragment_machine -> Asmir.varctx -> int64 -> Vine.decl list * Vine.stmt list
+
+val decode_insns : Fragment_machine.fragment_machine -> Asmir.varctx -> int64 -> int -> Vine.decl list * Vine.stmt list
+
+val last : 'a list -> 'a
+
+val has_special : Vine.stmt list -> bool
+
+val tuple_push : 'a * 'b -> 'a list * 'b list -> 'a list * 'b list
+
+val add_remove_hook : Fragment_machine.fragment_machine -> unit
+
+val with_mem_bytemap : int64 -> int -> int64 -> unit
+val erase_trans_cache : int64 -> unit
+val clear_trans_cache : unit -> unit

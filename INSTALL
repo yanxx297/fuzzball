@@ -30,6 +30,7 @@ sudo apt-get install ocaml ocaml-findlib libgdome2-ocaml-dev camlidl
 sudo apt-get build-dep ocaml
 # ocaml-native-compilers improves compilation speed
 sudo apt-get install libextlib-ocaml-dev ocaml-native-compilers
+sudo apt-get install libyojson-ocaml-dev
 sudo apt-get install libocamlgraph-ocaml-dev
 sudo apt-get install libsqlite3-ocaml-dev
 # texlive is big, but used with ocamldoc, etc.
@@ -225,6 +226,7 @@ information in native binaries to let GDB print backtraces.
 
 You need ExtLib, http://code.google.com/p/ocaml-extlib/
 
+The CGC version needs Yojson, http://mjambon.com/yojson.html
 
 FuzzBALL build process:
 

@@ -8,12 +8,13 @@ module V = Vine;;
 open Exec_options;;
 open Exec_exceptions;;
 open Fragment_machine;;
+open Exec_assert_minder;;
 
 class linux_special_nonhandler (fm : fragment_machine) =
 object(self)
   method private unhandle_syscall str =
     if !opt_trace_stopping then
-      (Printf.printf "Not handling system call special %s\n" str;
+      (Printf.eprintf "Not handling system call special %s\n" str;
        fm#print_regs);
     raise (UnhandledSysCall("System calls disabled"))
 
@@ -25,6 +26,7 @@ object(self)
 
   method make_snap : unit = ()
   method reset : unit = ()
+  method state_json : Yojson.Safe.json option = None
 end
 
 class trap_special_nonhandler (fm : fragment_machine) =
@@ -35,6 +37,7 @@ object(self)
       | _ -> None
   method make_snap : unit = ()
   method reset : unit = ()
+  method state_json : Yojson.Safe.json option = None
 end
 
 let translate_creq tool_str req_num =
@@ -100,7 +103,7 @@ object(self)
 	arg5 = at_off 5
     in
       if !opt_trace_client_reqs then
-	Printf.printf "0x%08Lx: %s(0x%Lx, 0x%Lx, 0x%Lx, 0x%Lx, 0x%Lx)\n"
+	Printf.eprintf "0x%08Lx: %s(0x%Lx, 0x%Lx, 0x%Lx, 0x%Lx, 0x%Lx)\n"
 	  eip req_name arg1 arg2 arg3 arg4 arg5
 
   method handle_special str : V.stmt list option =
@@ -109,6 +112,7 @@ object(self)
       | _ -> None
   method make_snap : unit = ()
   method reset : unit = ()
+  method state_json : Yojson.Safe.json option = None
 end
 
 
@@ -160,6 +164,7 @@ object(self)
       | (_, _) -> None
   method make_snap : unit = ()
   method reset : unit = ()
+  method state_json : Yojson.Safe.json option = None
 end
   
 class x87_emulator_special_handler (fm : fragment_machine) =
@@ -169,17 +174,35 @@ object(self)
       | "x87 emulator trap" ->
 	  (* This is like a call, but with the return to the current
 	     address, which is the first FPU instruction *)
-	  assert(!opt_arch = X86);
+	  g_assert(!opt_arch = X86) 100 "Special_handlers.x87_emulator_special_handler";
 	  let this_addr = fm#get_eip and
 	      emu_addr = match !opt_x87_entry_point with
 		| Some addr -> addr
 		| None -> failwith "Missing x87_entry_point in special handler"
 	  in
 	    if !opt_trace_fpu then
-	      Printf.printf "Triggering x87 emulator at 0x%08Lx: %s\n"
+	      Printf.eprintf "Triggering x87 emulator at 0x%08Lx: %s\n"
 		this_addr (fm#disasm_insn_at this_addr);
 	    Some (fm#fake_call_to_from emu_addr this_addr)
       | _ -> None
   method make_snap : unit = ()
   method reset : unit = ()
+  method state_json : Yojson.Safe.json option = None
+end
+
+
+class sse_floating_point_punter (fm : fragment_machine) =
+  (** CLang encodes floating point math in a different way than GCC by default.
+      This code just punts on SSE floating point instructions *)
+object(self)
+  method handle_special (str : string) : V.stmt list option =
+    try
+      let relevant = String.sub str 10 3 in (* magic relies on the way error messages come from libvex *)
+      if (String.compare "SSE" relevant ) = 0
+      then Some [] (* some no-op *)
+      else None
+    with _ -> None
+  method make_snap : unit = ()
+  method reset : unit = ()
+  method state_json : Yojson.Safe.json option = None
 end

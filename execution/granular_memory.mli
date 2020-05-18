@@ -28,7 +28,7 @@ sig
 
   type missing_t = int -> int64 -> D.t
 
-  val  gran8_get_byte  : gran8  -> missing_t -> int64 ->        (D.t * gran8)
+  val gran8_get_byte   : gran8  -> missing_t -> int64 ->        (D.t * gran8)
   val gran16_get_byte  : gran16 -> missing_t -> int64 -> int -> (D.t * gran16)
   val gran32_get_byte  : gran32 -> missing_t -> int64 -> int -> (D.t * gran32)
   val gran64_get_byte  : gran64 -> missing_t -> int64 -> int -> (D.t * gran64)
@@ -61,6 +61,8 @@ sig
   val gran64_size : gran64 -> int
 
   class virtual granular_memory : object
+    method set_pointer_management : Pointer_management.pointer_management -> unit
+
     method on_missing : missing_t -> unit
 
     method private virtual store_common_fast :
@@ -79,16 +81,20 @@ sig
     method load_word  : int64 -> D.t
     method load_long  : int64 -> D.t
 
-    method store_byte  : int64 -> D.t -> unit
-    method store_short : int64 -> D.t -> unit
-    method store_word  : int64 -> D.t -> unit
-    method store_long  : int64 -> D.t -> unit
+    method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_short : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_long  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
 
     method store_page : int64 -> string -> unit
 	    
     method virtual clear : unit -> unit
 
     method virtual measure_size : int * int * int
+
+    method virtual update_mem : int64 -> gran64 -> unit
+
+    method virtual copy_to :  granular_memory -> unit
   end
     
   class granular_page_memory : object
@@ -109,13 +115,15 @@ sig
     method load_short : int64 -> D.t
     method load_word  : int64 -> D.t
     method load_long  : int64 -> D.t
-    method store_byte  : int64 -> D.t -> unit
-    method store_short : int64 -> D.t -> unit
-    method store_word  : int64 -> D.t -> unit
-    method store_long  : int64 -> D.t -> unit
+    method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_short : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_long  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
     method store_page : int64 -> string -> unit
     method clear : unit -> unit
     method measure_size : int * int * int
+    method update_mem : int64 -> gran64 -> unit
+    method copy_to :  granular_memory -> unit
   end
 
   class granular_sink_memory : object
@@ -136,13 +144,15 @@ sig
     method load_short : int64 -> D.t
     method load_word  : int64 -> D.t
     method load_long  : int64 -> D.t
-    method store_byte  : int64 -> D.t -> unit
-    method store_short : int64 -> D.t -> unit
-    method store_word  : int64 -> D.t -> unit
-    method store_long  : int64 -> D.t -> unit
+    method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_short : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_long  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
     method store_page : int64 -> string -> unit
     method clear : unit -> unit
     method measure_size : int * int * int
+    method update_mem : int64 -> gran64 -> unit
+    method copy_to :  granular_memory -> unit
   end
 
   class granular_hash_memory : object
@@ -163,17 +173,20 @@ sig
     method load_short : int64 -> D.t
     method load_word  : int64 -> D.t
     method load_long  : int64 -> D.t
-    method store_byte  : int64 -> D.t -> unit
-    method store_short : int64 -> D.t -> unit
-    method store_word  : int64 -> D.t -> unit
-    method store_long  : int64 -> D.t -> unit
+    method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_short : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_long  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
     method store_page : int64 -> string -> unit
     method clear : unit -> unit
     method measure_size : int * int * int
+    method update_mem : int64 -> gran64 -> unit
+    method copy_to :  granular_memory -> unit
   end
 
   class granular_snapshot_memory : granular_memory -> granular_memory ->
   object
+    method set_pointer_management : Pointer_management.pointer_management -> unit
     method on_missing : missing_t -> unit
     method maybe_load_byte  : int64 -> D.t option
     method maybe_load_short : int64 -> D.t option
@@ -183,21 +196,28 @@ sig
     method load_short : int64 -> D.t
     method load_word  : int64 -> D.t
     method load_long  : int64 -> D.t
-    method store_byte  : int64 -> D.t -> unit
-    method store_short : int64 -> D.t -> unit
-    method store_word  : int64 -> D.t -> unit
-    method store_long  : int64 -> D.t -> unit
+    method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_short : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_long  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
     method store_page : int64 -> string -> unit
     method clear : unit -> unit
     method measure_size : int * int * int
 
     method make_snap : unit -> unit
     method reset : unit -> unit
+
+    method update_mem : int64 -> gran64 -> unit
+    method copy_to :  granular_memory -> unit
+
+
+
   end
 
   class granular_second_snapshot_memory :
     granular_snapshot_memory -> granular_memory ->
   object
+    method set_pointer_management : Pointer_management.pointer_management -> unit
     method on_missing : missing_t -> unit
     method maybe_load_byte  : int64 -> D.t option
     method maybe_load_short : int64 -> D.t option
@@ -207,10 +227,10 @@ sig
     method load_short : int64 -> D.t
     method load_word  : int64 -> D.t
     method load_long  : int64 -> D.t
-    method store_byte  : int64 -> D.t -> unit
-    method store_short : int64 -> D.t -> unit
-    method store_word  : int64 -> D.t -> unit
-    method store_long  : int64 -> D.t -> unit
+    method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_short : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_long  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
     method store_page : int64 -> string -> unit
     method clear : unit -> unit
     method measure_size : int * int * int
@@ -219,6 +239,9 @@ sig
     method reset : unit -> unit
 
     method inner_make_snap : unit -> unit
+
+    method update_mem : int64 -> gran64 -> unit
+    method copy_to :  granular_memory -> unit
   end
     
   class concrete_adaptor_memory : Concrete_memory.concrete_memory -> object
@@ -231,17 +254,21 @@ sig
     method load_short : int64 -> D.t
     method load_word  : int64 -> D.t
     method load_long  : int64 -> D.t
-    method store_byte  : int64 -> D.t -> unit
-    method store_short : int64 -> D.t -> unit
-    method store_word  : int64 -> D.t -> unit
-    method store_long  : int64 -> D.t -> unit
+    method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_short : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_long  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
     method clear : unit -> unit
     method measure_size : int * int * int
+    method update_mem : int64 -> gran64 -> unit
+    method copy_to :  granular_memory -> unit
+
   end
 
   class concrete_maybe_adaptor_memory :
     Concrete_memory.concrete_memory ->
   object
+    method set_pointer_management : Pointer_management.pointer_management -> unit
     method on_missing : missing_t -> unit
     method maybe_load_byte  : int64 -> D.t option
     method maybe_load_short : int64 -> D.t option
@@ -251,12 +278,14 @@ sig
     method load_short : int64 -> D.t
     method load_word  : int64 -> D.t
     method load_long  : int64 -> D.t
-    method store_byte  : int64 -> D.t -> unit
-    method store_short : int64 -> D.t -> unit
-    method store_word  : int64 -> D.t -> unit
-    method store_long  : int64 -> D.t -> unit
+    method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_short : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_long  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
     method store_page : int64 -> string -> unit
     method clear : unit -> unit
     method measure_size : int * int * int
+    method update_mem : int64 -> gran64 -> unit
+    method copy_to :  granular_memory -> unit
   end
 end

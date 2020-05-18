@@ -6,6 +6,7 @@ module V = Vine;;
 
 open Exec_exceptions;;
 open Exec_options;;
+open Exec_assert_minder;;
 
 type decision_tree_node = {
   (* Only the root has parent = None *)
@@ -46,6 +47,11 @@ type decision_tree_node = {
 and
   dt_node_ref = int
 
+let bool_to_string b =
+  if b
+  then "1"
+  else "0" 
+
 (* Mask to restrict an OCaml "int" to be at most 32 bits. This is a
    no-op on a 32-bit system, but not on a 64-bit system. And it's a
    little tricky to write, becuse the code has to compile correctly on
@@ -79,11 +85,11 @@ let dt_node_to_string n =
     (f_child_int land mask_32bits_int) (t_child_int land mask_32bits_int)
     (n.heur_min land mask_32bits_int) (n.heur_max land mask_32bits_int)
     (query_children_int land 0xffff) n.eip_loc in
-    assert(String.length s = 61);
+  g_assert (String.length s = 61) 100 "Binary_decision_tree.dt_node_to_string";
     s
 
 let string_to_dt_node ident_arg s =
-  assert(String.length s = 61);
+  g_assert(String.length s = 61) 100 "Binary_decision_tree.string_to_dt_node";
   let parent_str = String.sub s 0 8 and
       flags_char = s.[8] and
       f_child_str = String.sub s 9 8 and
@@ -135,12 +141,12 @@ let string_to_dt_node ident_arg s =
 
 let next_dt_ident = ref 0
 
-let ident_to_node_table = Array.init 1024 (fun _ -> None)
+let ident_to_node_table = Array.make 1024 None
 
 let nodes_fd_or = ref None
 
 let nodes_fd () =
-  assert(!opt_decision_tree_use_file);
+  g_assert(!opt_decision_tree_use_file) 100 "Binary_decision_tree.nodes_fd";
   match !nodes_fd_or with
     | Some fd -> fd
     | None ->
@@ -153,11 +159,11 @@ let nodes_fd () =
 let ident_to_node i =
   if !opt_decision_tree_use_file then
     ((let off = Unix.lseek (nodes_fd ()) (54 * (i-1)) Unix.SEEK_SET in
-	assert(off = 54 * (i-1)));
+	g_assert(off = 54 * (i-1)) 100 "Binary_decision_tree.ident_to_node");
      let buf = String.create 54 in
      let len = Unix.read (nodes_fd ()) buf 0 54 in
-       assert(len = 54);
-       assert(String.sub buf 45 1 = "\n");
+       g_assert(len = 54) 100 "Binary_decision_tree.ident_to_node";
+       g_assert(String.sub buf 45 1 = "\n") 100 "Binary_decision_tree.ident_to_node";
        string_to_dt_node i (String.sub buf 0 53))
   else
     let i3 = i land 1023 and
@@ -220,14 +226,14 @@ let print_node chan n =
 let update_dt_node n =
   (* assert(n = string_to_dt_node n.ident (dt_node_to_string n)); *)
   if !opt_trace_decision_tree then
-    (Printf.printf "DT: Writing back node %d\n" n.ident;
+    (Printf.eprintf "DT: Writing back node %d\n" n.ident;
      print_node stdout n);
   if !opt_decision_tree_use_file then
     let i = n.ident in 
       (let off = Unix.lseek (nodes_fd ()) (54 * (i-1)) Unix.SEEK_SET in
-	 assert(off = 54 * (i-1)));
+	 g_assert(off = 54 * (i-1)) 100 "Binary_decision_tree.update_dt_node");
       let len = Unix.write (nodes_fd ()) (dt_node_to_string n ^ "\n") 0 54 in
-	assert(len = 54);
+	g_assert(len = 54) 100 "Binary_decision_tree.update_dt_node";
   else
     let i3 = n.ident land 1023 and
 	i2 = (n.ident asr 10) land 1023 and
@@ -252,13 +258,13 @@ let new_dt_node the_parent =
        let t2 = match ident_to_node_table.(i1) with
 	 | Some t -> t
 	 | None ->
-	     let t = Array.init 1024 (fun _ -> None) in
+	     let t = Array.create 1024 None in
 	       ident_to_node_table.(i1) <- Some t; t
        in
        let t3 = match t2.(i2) with
 	 | Some t -> t
 	 | None ->
-	     let t = Array.init 1024 (fun _ -> "") in
+	     let t = Array.create 1024 "" in
 	       t2.(i2) <- Some t; t
        in
 	 ignore(i3);
@@ -311,6 +317,8 @@ let hash_round h x =
 class binary_decision_tree = object(self)
   inherit Decision_tree.decision_tree
 
+  val seen = Hashtbl.create 100
+
   val root_ident = (new_dt_node None).ident
 
   (* "cur" is the core changing state that points to the decision tree
@@ -339,20 +347,35 @@ class binary_decision_tree = object(self)
       root.query_children <- Some 0;
       update_dt_node root;
       cur <- root;
+      Hashtbl.replace seen cur.eip_loc cur;
       cur_query <- root;
       if !opt_trace_decision_tree then
-	Printf.printf "DT: Initialized.\n";
+	Printf.eprintf "DT: Initialized.\n";
+(*
+      let module Log = 
+	    (val !Loggers.fuzzball_bdt_json : Yojson_logger.JSONLog) in
+      Log.trace (Yojson_logger.LazyJson
+		   (lazy
+		      (`Assoc [
+			"function", `String "init";
+			"node", `Int cur.ident;
+		      ])
+		   )
+      );
+*)
       (self :> Decision_tree.decision_tree)
 
   method reset =
     cur <- get_dt_node root_ident;
+    Hashtbl.replace seen cur.eip_loc cur;
     cur_query <- get_dt_node root_ident;
     cur_heur <- -1;
     depth <- 0;
     path_hash <- Int64.to_int32 0x811c9dc5L;
     iteration_count <- iteration_count + 1;
+    Hashtbl.clear seen;
     if !opt_trace_randomness then
-      Printf.printf "Initializing random state as %08x\n" iteration_count;
+      Printf.eprintf "Initializing random state as %08x\n" iteration_count;
     randomness <- Random.State.make [|!opt_random_seed; iteration_count|]
 
   method get_hist =
@@ -377,8 +400,9 @@ class binary_decision_tree = object(self)
       loop cur
 
   method get_hist_str = 
-    String.concat ""
-      (List.map (fun b -> if b then "1" else "0") (List.rev self#get_hist));
+    let append accum next = (bool_to_string next) ^ accum in
+    List.fold_left append "" self#get_hist
+
 
   method private get_hist_queries =
     let kid n b =
@@ -396,7 +420,7 @@ class binary_decision_tree = object(self)
 	    | [] -> (q, h, n)
 	    | first :: rest -> loop (first :: q) (kid n first) rest
       in
-      assert(n.query_children <> None);
+      g_assert(n.query_children <> None) 100 "Binary_decision_tree.get_hist_queries";
 	match h with
 	  | [] -> ([], [], n)
 	  | first :: rest -> 
@@ -415,15 +439,15 @@ class binary_decision_tree = object(self)
   method get_hist_str_queries = 
     String.concat "-"
       (List.map
-	 (fun q -> String.concat ""
-	    (List.map (fun b -> if b then "1" else "0") q))
+	 (fun q -> String.concat "" 
+	    (List.map bool_to_string q))
 	 self#get_hist_queries)
 
   method get_hist_str_bracketed = 
     String.concat ""
       (List.map
 	 (fun q -> let s = String.concat ""
-	    (List.map (fun b -> if b then "1" else "0") q) in
+	    (List.map bool_to_string q) in
 	    if String.length s = 1 then s else "[" ^ s ^ "]")
 	 self#get_hist_queries)
 
@@ -431,25 +455,55 @@ class binary_decision_tree = object(self)
 
   method private forget_unsat b =
     if !opt_trace_decision_tree then
-      Printf.printf "DT: Forgetting unsat of %B child to %d\n" b cur.ident;
+      Printf.eprintf "DT: Forgetting unsat of %B child to %d\n" b cur.ident;
     (if b then put_t_child else put_f_child) cur None
 
   method add_kid b =
     if !opt_trace_decision_tree then
-      Printf.printf "DT: Adding %B child to %d\n" b cur.ident;
-    assert(not cur.all_seen);
-    match (b, (get_f_child cur), (get_t_child cur)) with
+      Printf.eprintf "DT: Adding %B child to %d\n" b cur.ident;
+    g_assert(not cur.all_seen) 100 "Binary_decision_tree.add_kid";
+    let status =
+    (match (b, (get_f_child cur), (get_t_child cur)) with
       | (false, Some(Some kid), _)
-      | (true,  _, Some(Some kid)) -> () (* already there *)
+      | (true,  _, Some(Some kid)) ->
+	"child already exists"
       | (false, None, _) ->
-	  let new_kid = new_dt_node (Some cur) in
-	    put_f_child cur (Some (Some new_kid))
+	let new_kid = new_dt_node (Some cur) in
+	put_f_child cur (Some (Some new_kid));
+	  "adding false child";
       | (true,  _, None) ->
-	  let new_kid = new_dt_node (Some cur) in
-	    put_t_child cur (Some (Some new_kid))
+	let new_kid = new_dt_node (Some cur) in
+	put_t_child cur (Some (Some new_kid));
+	"adding true child"
       | (false, Some None, _)
       | (true,  _, Some None) ->
-	  failwith "Tried to extend an unsat branch"
+	failwith "Tried to extend an unsat branch") in
+    let module Log = 
+	  (val !Loggers.fuzzball_bdt_json : Yojson_logger.JSONLog) in
+
+    let childId = match status with
+      | "child already exists" -> -1
+      | "adding false child" ->
+	(match cur.f_child with
+	| Some Some cid -> cid
+	| _ -> -1)
+      | "adding true child" ->
+	(match cur.t_child with
+	| Some Some cid -> cid
+	| _ -> -1)
+      | _ -> failwith "Didn't match status string, shouldn't happen" in
+
+    Log.trace (Yojson_logger.LazyJson
+		 (lazy
+		    (`Assoc [
+		      "function", `String "add_kid";
+		      "node", `Int cur.ident; 
+		      "childId", `Int childId;
+		      "childBranch", `Bool b;
+		      "status", `String status;
+		    ])
+		 )
+    ) 	  
 
   (* Calls to start_new_query(_binary)? and count_query should
      alternate along each execution path, delimiting the one or more
@@ -460,21 +514,25 @@ class binary_decision_tree = object(self)
        then called start_new_query again. You need to call count_query
        after the first decisions, and before calling start_new_query
        again. *)
-    assert(cur.query_children <> None);
+    g_assert(cur.query_children <> None) 100 "Binary_decision_tree.start_new_query";
     if !opt_trace_decision_tree then
-      Printf.printf "DT: New query, updating cur_query to cur %d\n" cur.ident;
+      Printf.eprintf "DT: New query, updating cur_query to cur %d\n" cur.ident;
     cur_query <- cur
 
   method start_new_query_binary =
     self#start_new_query;
     match cur_query.query_children with
       |	None | Some 0 | Some 1 | Some 2 -> ()
-      | _ -> failwith "Too many children in start_new_query_binary"
+      | Some n ->
+	  Printf.eprintf "Current query node is %d with %d children\n"
+	    cur_query.ident n;
+          self#print_dot;
+	  failwith "Too many children in start_new_query_binary"
 
   method count_query =
     let rec finish_internal_nodes n top =
       if !opt_trace_decision_tree then
-	Printf.printf "DT: Finish internal nodes at %d (%B)\n" n.ident top;
+	Printf.eprintf "DT: Finish internal nodes at %d (%B)\n" n.ident top;
       if n.query_children = None || top then
 	((match get_f_child n with
 	    | Some(Some kid) -> finish_internal_nodes kid false
@@ -487,7 +545,7 @@ class binary_decision_tree = object(self)
 	 self#maybe_mark_all_seen_node n)
     in
       if !opt_trace_decision_tree then
-	Printf.printf "DT: count_query at %d (q %d)" cur.ident cur_query.ident;
+	Printf.eprintf "DT: count_query at %d (q %d)" cur.ident cur_query.ident;
       if cur.ident <> cur_query.ident then 
 	(if cur.query_children = None then
 	   cur.query_children <- Some 0;
@@ -495,31 +553,44 @@ class binary_decision_tree = object(self)
 	    | None -> failwith "Count_query outside a query"
 	    | Some k when not cur.query_counted ->
 		if !opt_trace_decision_tree then	
-		  Printf.printf " -> %d" (k+1);
-		assert(k < !opt_query_branch_limit);
+		  Printf.eprintf " -> %d" (k+1);
+		g_assert(k < !opt_query_branch_limit) 100 "Binary_decision_tree.count_query";
  		cur_query.query_children <- Some (k + 1);
 		update_dt_node cur_query;
 		cur.query_counted <- true
 	    | Some k -> ());
 	 update_dt_node cur;
 	 if !opt_trace_decision_tree then	
-	   Printf.printf "\n";
+	   Printf.eprintf "\n";
 	 match cur_query.query_children with 
 	   | Some k when k >= !opt_query_branch_limit ->
 	       finish_internal_nodes cur_query true
 	   | _ -> ())
       else
 	if !opt_trace_decision_tree then	
-	  Printf.printf "\n"
+	  Printf.eprintf "\n"
 
   method extend b =
+    let module Log = 
+	  (val !Loggers.fuzzball_bdt_json : Yojson_logger.JSONLog) in
+    Log.trace (Yojson_logger.LazyJson
+		 (lazy
+		    (`Assoc [
+		      "function", `String "extend";
+		      "node", `Int cur.ident;
+		      "heuristic_min", `Int cur.heur_min;
+		      "heuristic_max", `Int cur.heur_max;
+		      "child", `Bool b;
+		    ])
+		 )
+    );
     if !opt_trace_decision_tree then
-      Printf.printf "DT: Extending with %B at %d\n" b cur.ident;
+      Printf.eprintf "DT: Extending with %B at %d\n" b cur.ident;
     self#add_kid b;
     path_hash <- hash_round path_hash (if b then 49 else 48);
     (let h = Int32.to_int path_hash in
        (if !opt_trace_randomness then
-	  Printf.printf "Setting random state to %08x\n" h;
+	  Printf.eprintf "Setting random state to %08x\n" h;
 	randomness <- Random.State.make [|!opt_random_seed; h|]));
     (match (b, get_f_child cur, get_t_child cur) with
        | (false, Some(Some kid), _) -> cur <- kid
@@ -528,7 +599,8 @@ class binary_decision_tree = object(self)
        | (true,  _, None)
        | (false, Some None, _)
        | (true,  _, Some None) ->
-	   failwith "Add_kid failed in extend");
+	 failwith "Add_kid failed in extend");
+    Hashtbl.replace seen cur.eip_loc cur;
     depth <- depth + 1;
     if (Int64.of_int depth) > !opt_path_depth_limit then
       raise DeepPath
@@ -539,20 +611,26 @@ class binary_decision_tree = object(self)
   method random_bit =
     let b = Random.State.bool randomness in
       if !opt_trace_randomness then
-	Printf.printf "Flipping a coin to get %B\n" b;
+	Printf.eprintf "Flipping a coin to get %B\n" b;
       b
 
   method random_float =
     let f = Random.State.float randomness 1.0 in
       if !opt_trace_randomness then
-	Printf.printf "Flipping a floating coin to get %f\n" f;
+	Printf.eprintf "Flipping a floating coin to get %f\n" f;
       f
 
   method random_byte =
     let b = Random.State.int randomness 256 in
       if !opt_trace_randomness then
-	Printf.printf "Rolling a 256-sided die to get %d\n" b;
+	Printf.eprintf "Rolling a 256-sided die to get %d\n" b;
       b
+
+  method random_word =
+    let i = Random.State.int64 randomness 0x100000000L in
+      if !opt_trace_randomness then
+	Printf.eprintf "Flipping a 32-bit coin to get %Ld\n" i;
+      i
 
   method record_unsat b =
     match (b, get_f_child cur, get_t_child cur) with
@@ -612,24 +690,29 @@ class binary_decision_tree = object(self)
 	       self#extend b';
 	       (b', trans_func b'))
     in
-      assert(not cur.all_seen);
+      g_assert(not cur.all_seen) 100 "Binary_decision_tree.try_extend";
       if cur.eip_loc <> 0L && cur.eip_loc <> eip_loc then
 	(* For a discussion of why we have this check, and how to interpret
 	   the .%04Lx values, see the comment before SPFM.eip_ident *)
-	Printf.printf
-	  ("Decision tree inconsistency: node " ^^
-	     "%d was 0x%08Lx.%04Lx and then %08Lx.%04Lx\n")
-	  cur.ident
-	  (Int64.shift_right cur.eip_loc 16) (Int64.logand cur.eip_loc 0xffffL)
-	  (Int64.shift_right eip_loc 16) (Int64.logand eip_loc 0xffffL);
-      assert(cur.eip_loc = 0L || cur.eip_loc = eip_loc);
+	(Printf.eprintf
+	   ("Decision tree inconsistency: node " ^^
+	      "%d was 0x%08Lx.%04Lx and then %08Lx.%04Lx\n")
+	   cur.ident
+	   (Int64.shift_right cur.eip_loc 16) (Int64.logand cur.eip_loc 0xffffL)
+	   (Int64.shift_right eip_loc 16) (Int64.logand eip_loc 0xffffL);
+	 if Hashtbl.mem seen eip_loc then
+	   Printf.eprintf "However, I have previously seen a node with that eip.\n"
+	 else
+	   (Printf.eprintf "And I've never seen a node with that eip.\n"); self#print_dot);
+      g_assert (cur.eip_loc = 0L || cur.eip_loc = eip_loc) 100
+	"Binary_decision_tree.try_extend 2";
       put_eip_loc cur eip_loc;
       let limited = match cur_query.query_children with 
 	| Some k when k >= !opt_query_branch_limit -> true
 	| _ -> false
       in
       if !opt_trace_decision_tree then	
-	Printf.printf "try_extend at %d\n" cur.ident;
+	Printf.eprintf "try_extend at %d\n" cur.ident;
       match (get_f_child cur, get_t_child cur, limited) with
 	| (Some(Some f_kid), Some(Some t_kid), _) ->
 	    (match (f_kid.all_seen, t_kid.all_seen) with
@@ -637,17 +720,17 @@ class binary_decision_tree = object(self)
 		   if cur.all_seen then
 		     known (random_bit_gen ())
 		   else
-		     (Printf.printf "Bug: kids %d and %d are all_seen, but not parent %d\n"
+		     (Printf.eprintf "Bug: kids %d and %d are all_seen, but not parent %d\n"
 			f_kid.ident t_kid.ident cur.ident;
 		      failwith "all_seen invariant failure")
 	       | (false, true) -> known false
 	       | (true, false) -> known true
 	       | (false, false) -> known (random_bit_gen ()))
 	| (Some(Some f_kid), Some None, _) ->
-	    assert(not f_kid.all_seen);
+	    g_assert(not f_kid.all_seen) 100 "Binary_decision_tree.try_extend";
 	    known false
 	| (Some None, Some(Some t_kid), _) ->
-	    assert(not t_kid.all_seen);
+	    g_assert(not t_kid.all_seen) 100 "Binary_decision_tree.try_extend";
 	    known true
 	| (Some None, Some None, _) -> failwith "Unsat node in try_extend"
 	| (Some(Some f_kid), None, false) ->
@@ -702,22 +785,24 @@ class binary_decision_tree = object(self)
       (match get_f_child n with
 	 | Some(Some kid) ->
 	     if not kid.all_seen then
-	       (Printf.printf "all_seen invariant failure: parent %d is all seen, but not true child %d%!\n"
+	       (Printf.eprintf "all_seen invariant failure: parent %d is all seen, but not true child %d%!\n"
 		  n.ident kid.ident;
 		self#print_tree stdout;
-		assert(kid.all_seen));
+		self#print_dot;
+		g_assert(kid.all_seen) 100 "Binary_decision_tree.mark_all_seen_node");
 	 | _ -> ());
       (match get_t_child n with
 	 | Some(Some kid) ->
 	     if not kid.all_seen then
-	       (Printf.printf "all_seen invariant failure: parent %d is all seen, but not true child %d%!\n"
+	       (Printf.eprintf "all_seen invariant failure: parent %d is all seen, but not true child %d%!\n"
 		  n.ident kid.ident;
 		self#print_tree stdout;
-	       assert(kid.all_seen))
+		self#print_dot;
+	       g_assert(kid.all_seen) 100 "Binary_decision_tree.mark_all_seen_node")
 	 | _ -> ());
       n.all_seen <- true;
       if !opt_trace_decision_tree then	
-	Printf.printf "Marking node %d as all_seen\n" n.ident;
+	Printf.eprintf "Marking node %d as all_seen\n" n.ident;
       update_dt_node n
     in
     let rec internal_nodes_check n top =
@@ -766,21 +851,21 @@ class binary_decision_tree = object(self)
 	      match q_parent.query_children with
 		| Some k when k >= !opt_query_branch_limit ->
 		    if k > !opt_query_branch_limit then
-		      (Printf.printf "Node %d has excessive count %d\n"
+		      (Printf.eprintf "Node %d has excessive count %d\n"
 			 q_parent.ident k;
-		       assert(k = !opt_query_branch_limit)
+		       g_assert(k = !opt_query_branch_limit) 100 "Binary_decision_tree.mark_all_seen_node"
 		      );
 		    if internal_nodes_check q_parent true then
 		      loop q_parent
 		| _ -> ()
     in
       if !opt_trace_decision_tree then	
-	Printf.printf "DT: Mark_all_seen at %d\n" node.ident;
+	Printf.eprintf "DT: Mark_all_seen at %d\n" node.ident;
       loop node
 
   method private maybe_mark_all_seen_node n =
     if !opt_trace_decision_tree then	
-      Printf.printf "DT: maybe_mark_all_seen_node at %d\n" n.ident;
+      Printf.eprintf "DT: maybe_mark_all_seen_node at %d\n" n.ident;
     if (match get_f_child n with
 	  | None -> false
 	  | Some None -> true
@@ -794,6 +879,18 @@ class binary_decision_tree = object(self)
       self#mark_all_seen_node n
 
   method set_heur i =
+(*    let module Log = 
+	  (val !Loggers.fuzzball_bdt_json : Yojson_logger.JSONLog) in
+    Log.trace (Yojson_logger.LazyJson
+		 (lazy
+		    (`Assoc [
+		      "function", `String "set_heur";
+		      "oldValue", `Int cur_heur;
+		      "newValue", `Int i;
+		    ])
+		 )
+    );
+*)
     cur_heur <- i;
     if i > best_heur then
       best_heur <- i;
@@ -806,7 +903,7 @@ class binary_decision_tree = object(self)
 	 n.heur_max <- max cur_heur n.heur_max;
 	 update_dt_node n;
 	 if !opt_trace_decision_tree then	
-	   Printf.printf "DT: propagate_heur %d (%d %d) at %d\n" cur_heur
+	   Printf.eprintf "DT: propagate_heur %d (%d %d) at %d\n" cur_heur
 	     n.heur_min n.heur_max n.ident;
 	 match get_parent n with
 	   | None -> ()
@@ -815,14 +912,28 @@ class binary_decision_tree = object(self)
       loop node
 
   method heur_preference =
+    let setH = ref false and
+	fMin = ref (-1) and
+	fMax = ref (-1) and
+	tMin = ref (-1) and
+	tMax = ref (-1) in
+(*    let module Log = 
+	  (val !Loggers.fuzzball_bdt_json : Yojson_logger.JSONLog) in
+*)
+    let preference = (
     match (get_f_child cur, get_t_child cur) with
       | (Some Some kid_f, Some Some kid_t) ->
 	  let f_min = kid_f.heur_min and
 	      f_max = kid_f.heur_max and
 	      t_min = kid_t.heur_min and
 	      t_max = kid_t.heur_max in
+	  setH := true;
+	  fMin := f_min;
+	  fMax := f_max;
+	  tMin := t_min;
+	  tMax := t_max;
 	    if !opt_trace_guidance then
-	      Printf.printf
+	      Printf.eprintf
 		"Heuristic choice between F[%d, %d] and T[%d, %d] (cur %d)\n"
 		f_min f_max t_min t_max cur_heur;
 	    if f_min > f_max || t_min > t_max then
@@ -842,16 +953,41 @@ class binary_decision_tree = object(self)
 	      else
 		None
 	    else if f_max <> t_max then
-	      ( (*Printf.printf "Preference based on max\n"; *)
+	      ( (*Printf.eprintf "Preference based on max\n"; *)
 	       Some (t_max > f_max))
 	    (* else if f_min <> t_min then
-	      ( (*Printf.printf "Preference based on min\n"; *)
+	      ( (*Printf.eprintf "Preference based on min\n"; *)
 	       Some (t_min > f_min)) *)
 	    else
 	      None
       | (Some Some _, None) -> Some false
       | (None, Some Some _) -> Some true
       | _ -> None
+    ) in
+(*    Log.trace (Yojson_logger.LazyJson
+		 (lazy
+		    (`Assoc [
+		      "function", `String "heur_preference";
+		      "consideredH", `Bool !setH;
+		      "falseKid", `Assoc [
+			"min", `Int !fMin;
+			"max", `Int !fMax;
+		      ];
+		      "trueKid", `Assoc [
+			"min", `Int !tMin;
+			"max", `Int !tMax;
+		      ];
+		      "preference_opt", `Variant ("preference", 
+						  (match preference with
+						  | Some p -> Some  (`Bool p)
+						  | None -> None
+						  ));
+		     ]
+		    )
+		 )
+    );
+*)
+    preference
 
   method mark_all_seen =
     self#mark_all_seen_node cur;
@@ -892,7 +1028,7 @@ class binary_decision_tree = object(self)
 	    failwith "Feasibility invariant failure in have_choice"
     in
       if !opt_trace_decision_tree then
-	Printf.printf "DT: at %d, have_choice is %b\n" cur.ident result;
+	Printf.eprintf "DT: at %d, have_choice is %b\n" cur.ident result;
       result
 
   method cur_ident =
@@ -920,6 +1056,31 @@ class binary_decision_tree = object(self)
 
   method measure_size =
     !next_dt_ident    
+
+  method print_dot = 
+    let rec viz_node fd n =  
+      let id = n.ident in
+      let eip = Int64.shift_right_logical n.eip_loc 16 in
+      let ident = Int64.logand 0x000000000000ffffL n.eip_loc in 
+      let style = 
+        (if (Int64.logand ident 0xc000L) = 0xc000L then "style=filled fillcolor=yellow"
+         else "")
+      in
+        Printf.fprintf fd "%d [label=\"%d:0x%Lx (0x%Lx)\" %s];\n" id id eip ident style;
+        (match get_f_child n with 
+           | Some(Some f) -> (Printf.fprintf fd "%d -> %d [label = \"false\"];\n" id f.ident ;viz_node fd f)
+           | _ -> ());
+        (match get_t_child n with 
+           | Some(Some t) -> (Printf.fprintf fd "%d -> %d [label = \"true\"];\n" id t.ident ;viz_node fd t)
+           | _ -> ());
+    in
+      if not (!opt_save_decision_tree_dot = "") then
+        (let fd = open_out !opt_save_decision_tree_dot in
+           Printf.fprintf fd "digraph G {\n";
+           let root = get_dt_node root_ident in
+             viz_node fd root;
+             Printf.fprintf fd "}\n";
+             close_out fd)      
 
   method print_tree chan =
     let rec loop n =

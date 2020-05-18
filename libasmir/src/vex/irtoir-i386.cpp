@@ -6,6 +6,7 @@
 #include <stddef.h>
 
 #include <string>
+#include <sstream>
 #include <vector>
 #include <iostream>
 #include <assert.h>
@@ -1689,7 +1690,9 @@ Stmt *i386_translate_put( IRStmt *stmt, IRSB *irbb, vector<Stmt *> *irout )
     else
     {
 	Exp::destroy(data);
-        result = new Special("Unrecognized register type");
+	std::stringstream foo;
+	foo << "Unrecognized register type at : 0x" << std::hex <<  offset;
+        result = new Special(foo.str());
     }
 
     return result;

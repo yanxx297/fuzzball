@@ -22,6 +22,7 @@ class linear_decision_tree : object
   method random_bit : bool
   method random_float : float
   method random_byte : int
+  method random_word : int64
   method record_unsat : bool -> unit
 
   method try_extend : (bool -> Vine.exp) ->
@@ -42,4 +43,5 @@ class linear_decision_tree : object
 
   method measure_size : int
   method print_tree : out_channel -> unit
+  method print_dot : unit
 end

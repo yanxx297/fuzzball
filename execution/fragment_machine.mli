@@ -7,6 +7,7 @@ class virtual special_handler : object
   method virtual handle_special : string -> Vine.stmt list option
   method virtual make_snap : unit
   method virtual reset : unit
+  method virtual state_json : Yojson.Safe.json option
 end
 
 type register_name = 
@@ -75,6 +76,9 @@ val comment_is_insn : string -> bool
    hiding internal methods. It's also convenient that it hides the domain
    functors. *)
 class virtual fragment_machine : object
+  method virtual get_depth : int
+  method virtual set_pointer_management : Pointer_management.pointer_management -> unit
+  method virtual get_pointer_management : unit -> Pointer_management.pointer_management option
   method virtual init_prog : Vine.program -> unit
   method virtual set_frag : Vine.program -> unit
   method virtual concretize_misc : unit
@@ -103,10 +107,10 @@ class virtual fragment_machine : object
   method virtual printable_word_reg : register_name -> string
   method virtual printable_long_reg : register_name -> string
 
-  method virtual store_byte_conc  : int64 -> int   -> unit
-  method virtual store_short_conc : int64 -> int   -> unit
-  method virtual store_word_conc  : int64 -> int64 -> unit
-  method virtual store_long_conc  : int64 -> int64 -> unit
+  method virtual store_byte_conc  : ?prov:Interval_tree.provenance -> int64 -> int   -> unit
+  method virtual store_short_conc : ?prov:Interval_tree.provenance -> int64 -> int   -> unit
+  method virtual store_word_conc  : ?prov:Interval_tree.provenance -> int64 -> int64 -> unit
+  method virtual store_long_conc  : ?prov:Interval_tree.provenance -> int64 -> int64 -> unit
 
   method virtual store_page_conc  : int64 -> string -> unit
 
@@ -128,10 +132,17 @@ class virtual fragment_machine : object
   method virtual unfinish_fuzz : string -> unit
   method virtual finish_reasons : string list
 
+  method virtual add_event_detail : string -> Yojson.Safe.json -> unit
+  method virtual get_event_details : (string, Yojson.Safe.json) Hashtbl.t
+  method virtual get_event_history : (string * Yojson.Safe.json) list
+  method virtual finalize_event : unit
+
   method virtual make_snap : unit -> unit
   method virtual reset : unit -> unit
 
   method virtual add_special_handler : special_handler -> unit
+  method virtual add_universal_special_handler : special_handler -> unit
+  method virtual special_handlers_state_json : Yojson.Safe.json
 
   method virtual get_bit_var   : register_name -> int
   method virtual get_byte_var  : register_name -> int
@@ -182,28 +193,30 @@ class virtual fragment_machine : object
 
   method virtual store_str : int64 -> int64 -> string -> unit
 
-  method virtual make_symbolic_region : int64 -> int -> string -> int -> unit
+  method virtual populate_symbolic_region :
+    ?prov:Interval_tree.provenance -> string -> int -> int64 -> int -> Vine.exp array
   method virtual make_fresh_symbolic_region : int64 -> int -> unit
 
   method virtual store_symbolic_cstr : int64 -> int -> bool -> bool -> unit
   method virtual store_concolic_cstr : int64 -> string -> bool -> unit
   method virtual store_concolic_name_str :
                    int64 -> string -> string -> int -> unit
+  method virtual populate_concolic_string :
+      ?prov:Interval_tree.provenance -> string -> int -> int64 -> string -> unit
 
   method virtual store_symbolic_wcstr : int64 -> int -> unit
 
-  method virtual store_symbolic_byte  : int64 -> string -> unit
-  method virtual store_symbolic_short : int64 -> string -> unit
-  method virtual store_symbolic_word  : int64 -> string -> unit
-  method virtual store_symbolic_long  : int64 -> string -> unit
+  method virtual store_symbolic_byte  : ?prov:Interval_tree.provenance -> int64 -> string -> unit
+  method virtual store_symbolic_short : ?prov:Interval_tree.provenance -> int64 -> string -> unit
+  method virtual store_symbolic_word  : ?prov:Interval_tree.provenance -> int64 -> string -> unit
+  method virtual store_symbolic_long  : ?prov:Interval_tree.provenance -> int64 -> string -> unit
 
-  method virtual store_concolic_mem_byte :
-    int64 -> string -> int64 -> int -> unit
+  method virtual store_concolic_mem_byte : ?prov:Interval_tree.provenance -> int64 -> string -> int64 -> int -> unit
 
-  method virtual store_concolic_byte  : int64 -> string -> int   -> unit
-  method virtual store_concolic_short : int64 -> string -> int   -> unit
-  method virtual store_concolic_word  : int64 -> string -> int64 -> unit
-  method virtual store_concolic_long  : int64 -> string -> int64 -> unit
+  method virtual store_concolic_byte  : ?prov:Interval_tree.provenance -> int64 -> string -> int   -> unit
+  method virtual store_concolic_short : ?prov:Interval_tree.provenance -> int64 -> string -> int   -> unit
+  method virtual store_concolic_word  : ?prov:Interval_tree.provenance -> int64 -> string -> int64 -> unit
+  method virtual store_concolic_long  : ?prov:Interval_tree.provenance -> int64 -> string -> int64 -> unit
 
   method virtual set_reg_conc_bytes : register_name 
     -> (int option array) -> unit
@@ -239,6 +252,8 @@ class virtual fragment_machine : object
 
   method virtual eval_expr_to_symbolic_expr : Vine.exp -> Vine.exp
 
+  method virtual eval_expr_from_ce : Query_engine.sat_assign -> Vine.exp -> int64
+
   method virtual watchpoint : unit
 
   method virtual mem_val_as_string : int64 -> Vine.typ -> string
@@ -257,6 +272,8 @@ class virtual fragment_machine : object
   method virtual set_iter_seed : int -> unit
 
   method virtual random_byte : int
+
+  method virtual random_word : int64
 
   method virtual finish_path : bool
 
@@ -277,12 +294,26 @@ class virtual fragment_machine : object
   method virtual load_long_concretize  : int64 -> bool -> string -> int64
 
   method virtual make_sink_region : string -> int64 -> unit
+
+  method virtual add_extra_store_hook : (int64 -> int -> unit) -> unit
+  method virtual run_store_hooks  : int64 -> int -> unit
+  method virtual note_first_branch : unit
+  method virtual before_first_branch : bool
+  method virtual get_start_eip : int64
+  method virtual set_start_eip : int64 -> unit
+	
+  method virtual schedule_proc : unit
+  method virtual alloc_proc : (unit -> unit) -> unit
+  method virtual maybe_switch_proc : int64 -> int64 option
 end
 
 module FragmentMachineFunctor :
   functor (D : Exec_domain.DOMAIN) ->
 sig
   class frag_machine : object
+    method get_depth : int
+    method set_pointer_management : Pointer_management.pointer_management -> unit
+    method get_pointer_management : unit -> Pointer_management.pointer_management option
     method init_prog : Vine.program -> unit
     method set_frag : Vine.program -> unit
     method concretize_misc : unit
@@ -315,15 +346,15 @@ sig
     method printable_word_reg : register_name -> string
     method printable_long_reg : register_name -> string
 
-    method store_byte  : int64 -> D.t -> unit
-    method store_short : int64 -> D.t -> unit
-    method store_word  : int64 -> D.t -> unit
-    method store_long  : int64 -> D.t -> unit
+    method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_short : ?prov:Interval_tree.provenance ->  int64 -> D.t -> unit
+    method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
+    method store_long  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
 
-    method store_byte_conc  : int64 -> int   -> unit
-    method store_short_conc : int64 -> int   -> unit
-    method store_word_conc  : int64 -> int64 -> unit
-    method store_long_conc  : int64 -> int64 -> unit
+    method store_byte_conc  : ?prov:Interval_tree.provenance -> int64 -> int   -> unit
+    method store_short_conc : ?prov:Interval_tree.provenance -> int64 -> int   -> unit
+    method store_word_conc  : ?prov:Interval_tree.provenance -> int64 -> int64 -> unit
+    method store_long_conc  : ?prov:Interval_tree.provenance -> int64 -> int64 -> unit
 
     method store_page_conc  : int64 -> string -> unit
 
@@ -350,10 +381,17 @@ sig
     method unfinish_fuzz : string -> unit
     method finish_reasons : string list
 
+    method add_event_detail : string -> Yojson.Safe.json -> unit
+    method get_event_details : (string, Yojson.Safe.json) Hashtbl.t
+    method get_event_history : (string * Yojson.Safe.json) list
+    method finalize_event : unit
+
     method make_snap : unit -> unit
     method reset : unit -> unit
 
     method add_special_handler : special_handler -> unit
+    method add_universal_special_handler : special_handler -> unit
+    method special_handlers_state_json : Yojson.Safe.json
 
     method handle_special : string -> Vine.stmt list option
 
@@ -435,27 +473,28 @@ sig
 
     method store_str : int64 -> int64 -> string -> unit
 
-    method make_symbolic_region : int64 -> int -> string -> int -> unit
     method make_fresh_symbolic_region : int64 -> int -> unit
+    method populate_symbolic_region : ?prov:Interval_tree.provenance -> string -> int -> int64 -> int -> Vine.exp array
 
     method store_symbolic_cstr : int64 -> int -> bool -> bool -> unit
     method store_concolic_cstr : int64 -> string -> bool -> unit
     method store_concolic_name_str :
-             int64 -> string -> string -> int -> unit
+     int64 -> string -> string -> int -> unit
+method populate_concolic_string : ?prov:Interval_tree.provenance -> string -> int -> int64 -> string -> unit
 
     method store_symbolic_wcstr : int64 -> int -> unit
 
-    method store_symbolic_byte  : int64 -> string -> unit
-    method store_symbolic_short : int64 -> string -> unit
-    method store_symbolic_word  : int64 -> string -> unit
-    method store_symbolic_long  : int64 -> string -> unit
+    method store_symbolic_byte  : ?prov:Interval_tree.provenance -> int64 -> string -> unit
+    method store_symbolic_short : ?prov:Interval_tree.provenance -> int64 -> string -> unit
+    method store_symbolic_word  : ?prov:Interval_tree.provenance -> int64 -> string -> unit
+    method store_symbolic_long  : ?prov:Interval_tree.provenance -> int64 -> string -> unit
 
-    method store_concolic_mem_byte : int64 -> string -> int64 -> int -> unit
+    method store_concolic_mem_byte : ?prov:Interval_tree.provenance -> int64 -> string -> int64 -> int -> unit
 
-    method store_concolic_byte  : int64 -> string -> int   -> unit
-    method store_concolic_short : int64 -> string -> int   -> unit
-    method store_concolic_word  : int64 -> string -> int64 -> unit
-    method store_concolic_long  : int64 -> string -> int64 -> unit
+    method store_concolic_byte  : ?prov:Interval_tree.provenance -> int64 -> string -> int   -> unit
+    method store_concolic_short : ?prov:Interval_tree.provenance -> int64 -> string -> int   -> unit
+    method store_concolic_word  : ?prov:Interval_tree.provenance -> int64 -> string -> int64 -> unit
+    method store_concolic_long  : ?prov:Interval_tree.provenance ->int64 -> string -> int64 -> unit
 
     method set_reg_conc_bytes : register_name 
       -> (int option array) -> unit
@@ -482,7 +521,7 @@ sig
     method read_buf : int64 -> int -> char array
 
     method read_cstr : int64 -> string
-
+		
     method zero_fill : int64 -> int -> unit
 
     method print_backtrace : unit
@@ -492,6 +531,8 @@ sig
     method eval_expr_to_int64 : Vine.exp -> int64
 
     method eval_expr_to_symbolic_expr : Vine.exp -> Vine.exp
+
+    method eval_expr_from_ce : Query_engine.sat_assign -> Vine.exp -> int64
 
     method watchpoint : unit
 
@@ -516,6 +557,7 @@ sig
     method print_tree : out_channel -> unit
     method set_iter_seed : int -> unit
     method random_byte : int
+    method random_word : int64
     method finish_path : bool
     method after_exploration : unit
     method make_x86_segtables_symbolic : unit
@@ -530,5 +572,16 @@ sig
     method load_word_concretize  : int64 -> bool -> string -> int64
     method load_long_concretize  : int64 -> bool -> string -> int64
     method make_sink_region : string -> int64 -> unit
+
+    method add_extra_store_hook : (int64 -> int -> unit) -> unit
+    method run_store_hooks  : int64 -> int -> unit
+    method note_first_branch : unit
+    method before_first_branch : bool
+    method get_start_eip : int64
+    method set_start_eip : int64 -> unit
+		
+    method schedule_proc : unit
+    method alloc_proc : (unit -> unit) -> unit
+    method maybe_switch_proc : int64 -> int64 option
   end
 end

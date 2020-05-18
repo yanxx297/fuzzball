@@ -34,6 +34,7 @@ let opt_symbolic_words_influence = ref []
 let opt_symbolic_longs_influence = ref []
 let opt_symbolic_regions = ref []
 let opt_concolic_cstrings = ref []
+let opt_concolic_cstring_files = ref []
 let opt_concolic_strings = ref []
 let opt_sink_regions = ref []
 let opt_measure_expr_influence_at_strings = ref None
@@ -41,6 +42,7 @@ let opt_check_condition_at_strings = ref []
 let opt_extra_condition_strings = ref []
 let opt_tracepoint_strings = ref []
 let opt_string_tracepoint_strings = ref []
+let opt_svn_version = ref false
 let opt_cmdline_arch = ref None
 
 let set_defaults_for_concrete () =
@@ -251,6 +253,9 @@ let concolic_state_cmdline_opts =
     ("-concolic-cstring-file", Arg.String
        (fun s ->
 	  let (s1, s2) = split_string '=' s in
+
+	  opt_concolic_cstring_files := ((Int64.of_string s1), s2) :: !opt_concolic_cstring_files;
+
 	  let str = slurp_file s2 in
 	    opt_concolic_cstrings :=
 	      ((Int64.of_string s1), str) :: !opt_concolic_cstrings),
@@ -317,7 +322,9 @@ let explore_cmdline_opts =
     ("-coverage-stats", Arg.Set(opt_coverage_stats),
      " Print pseudo-BB coverage statistics");
     ("-offset-strategy", Arg.String
-       (fun s -> opt_offset_strategy := offset_strategy_of_string s),
+       (fun s -> 
+	 opt_offset_strategy_string := s;
+	 opt_offset_strategy := offset_strategy_of_string s),
      "strategy Strategy for offset concretization: uniform, biased-small");
     ("-follow-path", Arg.Set_string(opt_follow_path),
      "string String of 0's and 1's signifying the specific path decisions to make.");
@@ -334,6 +341,13 @@ let explore_cmdline_opts =
     ("-always-prefer", Arg.Bool
        (fun b -> opt_always_prefer := Some b),
      "bool Prefer given branch direction instead of random");
+    ("-rare-delim", Arg.String
+       (fun s -> let (s1, s2) = split_string ':' s in
+	  Hashtbl.add opt_rare_delims (int_of_string s1)
+	    (1.0 /. (float_of_string s2))),
+     "char:len Choose input bytes to be CHAR only once every LEN comparisons, on average");
+    ("-auto-rare-delims", Arg.Set opt_auto_rare_delims,
+     " Apply -rare-delims in a random automatic way");
     ("-random-seed", Arg.Set_int opt_random_seed,
      "N Use given seed for path choice");
     ("-save-decision-tree-interval",
@@ -347,11 +361,13 @@ let explore_cmdline_opts =
      "SECS Finish exploration after a given time has elapsed");
     ("-target-string", Arg.String
        (fun s -> let (s1, s2) = split_string '=' s in
+	  opt_target_strings := (s1, s2) :: !opt_target_strings;
 	  opt_target_region_start := Some (Int64.of_string s1);
 	  opt_target_region_string := Exec_utils.unescaped s2),
      "base=string Try to make a buffer have the given contents");
     ("-target-string-file", Arg.String
        (fun s -> let (s1, s2) = split_string '=' s in
+	  opt_target_string_files := (s1, s2) :: !opt_target_string_files;
 	  opt_target_region_start := Some (Int64.of_string s1);
 	  opt_target_region_string := slurp_file s2),
      "base=filename same, but read string direct from a file");
@@ -398,10 +414,20 @@ let explore_cmdline_opts =
      " Set an integer limit on the global cache size");
     ("-disable-ce-cache", Arg.Set(opt_disable_ce_cache),
      " Do not use cached satisfying assingments at all");
+    ("-ignore-div-0", Arg.String (fun s -> opt_ignore_div_0 := div_0_notice_of_string s),
+     "String Raise: Raise Error, Warn: Warn, no error, Ignore: No warning, no error (best in conjunction with -sse-emulator punt)");
     ("-stop-on-weird-sym-addr", Arg.Set(opt_stop_on_weird_sym_addr),
      " Don't continue execution past a strange symbolic-controlled address");
     ("-finish-on-weird-sym-addr", Arg.Set(opt_finish_on_weird_sym_addr),
      " Finish exploration as with -stop-on-weird-sym-addr");
+    ("-noop-unhandled-special", Arg.Set(opt_noop_unhandled_special),
+     " Treat Unhandled special instructions as no-ops, supresses unhandled special errors.");
+    ("-no-emit-pollers", Arg.Clear(opt_emit_pollers),
+     "Don't Emit pollers as well as pov files");
+    ("-max-total-weird", Arg.Set_int(opt_max_weirdness),
+     " Set an integer limit on total assert-avoiding weirdness before ending run.");
+    ("-single-weird-threshold", Arg.Set_int(opt_max_weirdness),
+     " Set an integer limit on weirdness in single event before issuing failure.");
     ("-narrow-bitwidth-cutoff", Arg.String
        (fun s -> opt_narrow_bitwidth_cutoff := Some (int_of_string s)),
      "BITS Treat values narrower than width as non-pointers");
@@ -410,6 +436,9 @@ let explore_cmdline_opts =
      "SIZE Introduce temporaries for exprs of size or larger");
     ("-trace-simplify", Arg.Set(opt_trace_simplify),
      " Print expression simplifications");
+    ("-save-decision-tree-dot", 
+     Arg.Set_string(opt_save_decision_tree_dot), 
+     "filename Save dot format decision tree to file");
   ]
 
 
@@ -426,6 +455,8 @@ let fuzzball_cmdline_opts =
   [
     ("-check-for-null", Arg.Set(opt_check_for_null),
      " Check whether dereferenced values can be null");
+    ("-finish-on-null-deref", Arg.Set(opt_finish_on_null_deref),
+     " Finish exploration on finding a null dereference");
     (* This flag is misspelled, and will be renamed in the future. *)
     ("-no-fail-on-huer", Arg.Clear(opt_fail_offset_heuristic),
      " Do not fail when a heuristic (e.g. offset optimization) fails.");
@@ -453,10 +484,12 @@ let trace_detailed_opts = [(opt_trace_insns, "trace-insns");
 let cmdline_opts =
   [
     ("-arch", Arg.String
-       (fun s -> opt_cmdline_arch := Some (execution_arch_of_string s) ),
+      (fun s -> 
+	opt_arch_string := Some s;
+	opt_cmdline_arch := Some (execution_arch_of_string s) ),
      "arch x86, x64, arm (default: autodetect from ELF header)");
     ("-translation-cache-size", Arg.String
-       (fun s -> opt_translation_cache_size := Some (int_of_string s)),
+      (fun s -> opt_translation_cache_size := Some (int_of_string s)),
      "N Save translations of at most N instructions");
     ("-random-memory", Arg.Set(opt_random_memory),
      " Use random values for uninit. memory reads");
@@ -464,9 +497,13 @@ let cmdline_opts =
      " Use symbolic values for uninit. memory reads");
     ("-zero-memory", Arg.Set(opt_zero_memory),
      " Use zero values for uninit. memory reads");
+    ("-warn-large-alloc", Arg.String(fun s -> opt_big_alloc := Some (Int64.of_string s)),
+     "Int64.t Sets a threshold where, if a larger alloc occurs, a warning will be issued.");
+    ("-read-write-ratio-warn", Arg.Set_int opt_read_write_warn_ratio,
+     "Int Sets a threshold where, if we see more than X writes per read for a piece of memory, a warning is issued");
     ("-trace-basic",
      (Arg.Unit (fun () ->
-	  List.iter (fun (opt, _) -> opt := true) trace_basic_opts;)),
+		  List.iter (fun (opt, _) -> opt := true) trace_basic_opts)),
      " Enable several common trace and stats options");
     ("-trace-binary-paths", Arg.Set(opt_trace_binary_paths),
      " Print decision paths as bit strings");
@@ -481,7 +518,7 @@ let cmdline_opts =
 	  List.iter (fun (opt, _) -> opt := true) trace_detailed_opts;)),
      " Enable several verbose tracing options");
     ("-trace-detailed-range", Arg.String
-       (add_delimited_pair opt_trace_detailed_ranges '-'),
+      (add_delimited_pair opt_trace_detailed_ranges '-'),
      "N-M As above, but only for an eip range");
     ("-trace-eip", Arg.Set(opt_trace_eip),
      " Print PC of each insn executed");
@@ -503,6 +540,8 @@ let cmdline_opts =
      " Print each memory load");
     ("-trace-stores", Arg.Set(opt_trace_stores),
      " Print each memory store");
+    ("-trace-memory", Arg.Set(opt_trace_memory),
+     " Print each low-level granular memory op");
     ("-trace-callstack", Arg.Set(opt_trace_callstack),
      " Print calls and returns");
     ("-trace-regions", Arg.Set(opt_trace_regions),
@@ -528,35 +567,47 @@ let cmdline_opts =
     ("-time-stats", Arg.Set(opt_time_stats),
      " Print running time statistics");
     ("-periodic-stats", Arg.String
-       (fun s -> opt_periodic_stats := Some (Int64.of_string s)),
+      (fun s -> opt_periodic_stats := Some (Int64.of_string s)),
      "period Trigger statistics every PERIOD instructions");
     ("-watch-expr", Arg.String
-       (fun s -> opt_watch_expr_str := Some s),
+      (fun s -> opt_watch_expr_str := Some s),
      "expr Print Vine expression on each instruction");
     ("-tracepoint", Arg.String
-       (fun s -> add_delimited_num_str_pair opt_tracepoint_strings
-	  ':' s),
+      (fun s -> add_delimited_num_str_pair opt_tracepoint_strings
+	':' s),
      "eip:expr Print scalar expression on given EIP");
     ("-tracepoint-string", Arg.String
-       (fun s -> add_delimited_num_str_pair opt_string_tracepoint_strings
-	  ':' s),
+      (fun s -> add_delimited_num_str_pair opt_string_tracepoint_strings
+	':' s),
      "eip:expr Print string expression on given EIP");
     ("-check-condition-at", Arg.String
-       (fun s -> let (eip_s, expr_s) = split_string ':' s in
-	  opt_check_condition_at_strings :=
-	    (eip_s, expr_s) :: !opt_check_condition_at_strings),
+      (fun s -> let (eip_s, expr_s) = split_string ':' s in
+		opt_check_condition_at_strings :=
+		  (eip_s, expr_s) :: !opt_check_condition_at_strings),
      "eip:expr Check boolean assertion at address");
     ("-finish-on-nonfalse-cond", Arg.Set(opt_finish_on_nonfalse_cond),
      " Finish exploration if -c-c-a condition could be true");
     ("-finish-reasons-needed", Arg.Set_int(opt_finish_reasons_needed),
      "n Require N finish reasons to finish");
     ("-extra-condition", Arg.String
-       (fun s -> opt_extra_condition_strings :=
-	  s :: !opt_extra_condition_strings),
+      (fun s -> opt_extra_condition_strings :=
+	s :: !opt_extra_condition_strings),
      "cond Add an extra constraint for solving");
+    ("-check-for-jump-to", Arg.String
+      (fun s -> opt_check_for_jump_to :=
+	(Int64.of_string s) :: !opt_check_for_jump_to),
+     "addr Check if symbolic jump target can take given value");
+    ("-finish-on-controlled-jump", Arg.Set(opt_finish_on_controlled_jump),
+     " Finish exploration if -check-for-jump-to succeeds");
+    ("-check-for-ret-addr-overwrite",
+     Arg.Set(opt_check_for_ret_addr_overwrite),
+     " Check if a non-call instruction stores to a return address");
+    ("-finish-on-ret-addr-overwrite",
+     Arg.Set(opt_finish_on_ret_addr_overwrite),
+     " Finish exploration if -check-for-ret-addr-overwrite triggers");
     ("-extra-conditions-file", Arg.String
-       (fun s -> opt_extra_condition_strings :=
-	  !opt_extra_condition_strings @ (read_lines_file s)),
+      (fun s -> opt_extra_condition_strings :=
+	!opt_extra_condition_strings @ (read_lines_file s)),
      "filename Read '-extra-condition's one per line from file");
     ("-omit-pf-af", Arg.Set(opt_omit_pf_af),
      " Omit computation of the (rarely used) PF and AF flags");
@@ -564,16 +615,37 @@ let cmdline_opts =
      " Treat some unhandled system instructions as no-ops");
     ("-x87-emulator", Arg.String (fun s -> opt_x87_emulator := Some s),
      "emulator.so Enable x87 emulation with given code");
+    ("-sse-emulator", Arg.String (fun s -> opt_sse_emulator := Some s),
+     "emulator.so Enable SSE emulation with given code, or \"punt\" to no-op sse instructions");
     ("-final-pc", Arg.Set(opt_final_pc),
      " Print final path condition at end of trace");
     ("-solve-final-pc", Arg.Set(opt_solve_final_pc),
      " Solve final path condition");
     ("-git-version", Arg.Unit
-       (fun () -> Printf.printf "GIT version %s\n" Git_version.git_version),
+       (fun () -> Printf.eprintf "GIT version %s\n" Git_version.git_version),
      " Print GIT revision hash");
+    ("-svn-version", Arg.Unit
+      (fun () -> 
+	opt_svn_version := true;
+	Printf.eprintf "SVN version %s\n" Svn_version.svn_version),
+     " Print SVN revision number");
+    ("-memory-watching", Arg.Set(opt_memory_watching),
+     " Pay attention to memory related issues");
+    ("-basic-block-size", Arg.Set_int(opt_bb_size), "N Sets basic block size to N.  Default 1."); 
+    ("-veritesting-style", Arg.String set_opt_veritesting, "String Sets veritesting strategy.  Default NoVeritesting.");     
+    ("-record-random", Arg.String (fun s -> opt_log_random := (random_notice_of_string s)),
+     "String Sets how loud to be about calls to cgc_random.  Defaults to never.");
+
+    ("-addr-table-outloc", Arg.Set_string(Indirect_target_logger.output_loc),
+     "String Sets output location of jump address association table.  Default ./addr_table.txt");
+    ("-log-eip-outloc", Arg.Set_string(Eip_sequence_logger.output_loc),
+     "String Sets output location of eip sequence logger.  Default ./eip_sequence.txt");
+    ("-log-eip-sequence", Arg.Set(opt_log_eip_sequence),
+     "Log eip coverage");
+    ("-num-fd", Arg.Set_int(opt_num_fd), "N Number of file descriptors we consider open, from 0 to N.");
     ("-sanity-checks", Arg.Set(opt_sanity_checks),
      " Enable extra internal checking");
-  ]
+    ]
 
 let trace_replay_cmdline_opts =
   [
@@ -601,7 +673,7 @@ let trace_replay_cmdline_opts =
 let set_program_name_guess_arch s =
   match !opt_program_name with 
     | Some prev ->
-	Printf.printf "Multiple args: %s, %s\n" prev s;
+	Printf.eprintf "Multiple args: %s, %s\n" prev s;
 	failwith "Multiple non-option args not allowed"
     | None ->
 	opt_program_name := Some s;
@@ -666,7 +738,7 @@ let set_range_opts (fm : Fragment_machine.fragment_machine) opts_list value =
     set_range_opt fm opt_str value eip1 eip2
   ) opts_list;
   if (List.length opts_list) <> 0 && (List.length !final_range_opts) = 0 then
-    Printf.printf "****Warning: an incorrect option was given in -turn-opt-%s-range\n"
+    Printf.eprintf "****Warning: an incorrect option was given in -turn-opt-%s-range\n"
       (if value then "off" else "on");
   !final_range_opts
   
@@ -710,13 +782,13 @@ let apply_cmdline_opts_early (fm : Fragment_machine.fragment_machine) dl =
     fm#make_regs_symbolic
   else
     fm#make_regs_zero;
-  fm#add_special_handler
+  fm#add_universal_special_handler
     ((new Special_handlers.vg_client_req_special_handler fm)
      :> Fragment_machine.special_handler);
-  fm#add_special_handler
+  fm#add_universal_special_handler
     ((new Special_handlers.trap_special_nonhandler fm)
      :> Fragment_machine.special_handler);
-  fm#add_special_handler
+  fm#add_universal_special_handler
     ((new Special_handlers.cpuid_special_handler fm)
      :> Fragment_machine.special_handler)
 
@@ -867,6 +939,6 @@ let decide_start_addrs () =
       | (Some osa, None,      _       ) -> (osa,  osa)
   in
     if !opt_trace_setup then
-      Printf.printf "%s 0x%08Lx, fuzz start 0x%08Lx\n"
+      Printf.eprintf "%s 0x%08Lx, fuzz start 0x%08Lx\n"
 	"Starting address" start_addr fuzz_start;
     (start_addr, fuzz_start)

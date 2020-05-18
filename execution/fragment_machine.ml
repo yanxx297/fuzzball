@@ -15,8 +15,14 @@ open Stpvc_engine;;
 open Stp_external_engine;;
 open Concrete_memory;;
 open Granular_memory;;
+open Exec_assert_minder;;
 
-let bool64 f = fun a b -> if (f a b) then 1L else 0L
+let bool64 f a b =
+  if (f a b)
+  then 1L
+  else 0L
+
+let is_true _ = true
 
 (* Like String.trim, but compatible with OCaml 3.12 *)
 let str_trim s =
@@ -42,8 +48,9 @@ let stmt_to_string_compact st =
   str_trim (V.stmt_to_string st)
 
 let move_hash src dest =
+  let add a b = V.VarHash.add dest a b in
   V.VarHash.clear dest;
-  V.VarHash.iter (fun a b -> V.VarHash.add dest a b) src
+  V.VarHash.iter add src
 
 let skip_strings =
   (let h = Hashtbl.create 2 in
@@ -65,6 +72,7 @@ class virtual special_handler = object(self)
   method virtual handle_special : string -> V.stmt list option
   method virtual make_snap : unit
   method virtual reset : unit
+  method virtual state_json : Yojson.Safe.json option
 end
 
 type register_name = 
@@ -306,6 +314,9 @@ let regstr_to_reg s = match s with
   | _ -> failwith ("Unrecognized register name " ^ s)
 
 class virtual fragment_machine = object
+  method virtual get_depth : int
+  method virtual set_pointer_management : Pointer_management.pointer_management -> unit
+  method virtual get_pointer_management : unit -> Pointer_management.pointer_management option
   method virtual init_prog : Vine.program -> unit
   method virtual set_frag : Vine.program -> unit
   method virtual concretize_misc : unit
@@ -334,10 +345,10 @@ class virtual fragment_machine = object
   method virtual printable_word_reg : register_name -> string
   method virtual printable_long_reg : register_name -> string
 
-  method virtual store_byte_conc  : int64 -> int   -> unit
-  method virtual store_short_conc : int64 -> int   -> unit
-  method virtual store_word_conc  : int64 -> int64 -> unit
-  method virtual store_long_conc  : int64 -> int64 -> unit
+  method virtual store_byte_conc  : ?prov:Interval_tree.provenance -> int64 -> int   -> unit
+  method virtual store_short_conc : ?prov:Interval_tree.provenance -> int64 -> int   -> unit
+  method virtual store_word_conc  : ?prov:Interval_tree.provenance -> int64 -> int64 -> unit
+  method virtual store_long_conc  : ?prov:Interval_tree.provenance -> int64 -> int64 -> unit
 
   method virtual store_page_conc  : int64 -> string -> unit
 
@@ -359,10 +370,17 @@ class virtual fragment_machine = object
   method virtual unfinish_fuzz : string -> unit
   method virtual finish_reasons : string list
 
+  method virtual add_event_detail : string -> Yojson.Safe.json -> unit
+  method virtual get_event_details : (string, Yojson.Safe.json) Hashtbl.t
+  method virtual get_event_history : (string * Yojson.Safe.json) list
+  method virtual finalize_event : unit
+
   method virtual make_snap : unit -> unit
   method virtual reset : unit -> unit
 
   method virtual add_special_handler : special_handler -> unit
+  method virtual add_universal_special_handler : special_handler -> unit
+  method virtual special_handlers_state_json : Yojson.Safe.json
 
   method virtual get_bit_var   : register_name -> int
   method virtual get_byte_var  : register_name -> int
@@ -413,28 +431,31 @@ class virtual fragment_machine = object
 
   method virtual store_str : int64 -> int64 -> string -> unit
 
-  method virtual make_symbolic_region : int64 -> int -> string -> int -> unit
   method virtual make_fresh_symbolic_region : int64 -> int -> unit
 
   method virtual store_symbolic_cstr : int64 -> int -> bool -> bool -> unit
   method virtual store_concolic_cstr : int64 -> string -> bool -> unit
   method virtual store_concolic_name_str :
                    int64 -> string -> string -> int -> unit
+  method virtual populate_symbolic_region :
+    ?prov:Interval_tree.provenance -> string -> int -> int64 -> int -> Vine.exp array
+
+  method virtual populate_concolic_string :
+      ?prov:Interval_tree.provenance -> string -> int -> int64 -> string -> unit
 
   method virtual store_symbolic_wcstr : int64 -> int -> unit
 
-  method virtual store_symbolic_byte  : int64 -> string -> unit
-  method virtual store_symbolic_short : int64 -> string -> unit
-  method virtual store_symbolic_word  : int64 -> string -> unit
-  method virtual store_symbolic_long  : int64 -> string -> unit
+  method virtual store_symbolic_byte  : ?prov:Interval_tree.provenance -> int64 -> string -> unit
+  method virtual store_symbolic_short : ?prov:Interval_tree.provenance -> int64 -> string -> unit
+  method virtual store_symbolic_word  : ?prov:Interval_tree.provenance -> int64 -> string -> unit
+  method virtual store_symbolic_long  : ?prov:Interval_tree.provenance -> int64 -> string -> unit
 
-  method virtual store_concolic_mem_byte :
-    int64 -> string -> int64 -> int -> unit
+  method virtual store_concolic_mem_byte : ?prov:Interval_tree.provenance -> int64 -> string -> int64 -> int -> unit
 
-  method virtual store_concolic_byte  : int64 -> string -> int   -> unit
-  method virtual store_concolic_short : int64 -> string -> int   -> unit
-  method virtual store_concolic_word  : int64 -> string -> int64 -> unit
-  method virtual store_concolic_long  : int64 -> string -> int64 -> unit
+  method virtual store_concolic_byte  : ?prov:Interval_tree.provenance -> int64 -> string -> int   -> unit
+  method virtual store_concolic_short : ?prov:Interval_tree.provenance -> int64 -> string -> int   -> unit
+  method virtual store_concolic_word  : ?prov:Interval_tree.provenance -> int64 -> string -> int64 -> unit
+  method virtual store_concolic_long  : ?prov:Interval_tree.provenance -> int64 -> string -> int64 -> unit
 
   method virtual set_reg_conc_bytes : register_name 
     -> (int option array) -> unit
@@ -470,6 +491,8 @@ class virtual fragment_machine = object
       
   method virtual eval_expr_to_symbolic_expr : Vine.exp -> Vine.exp
 
+  method virtual eval_expr_from_ce : Query_engine.sat_assign -> Vine.exp -> int64
+
   method virtual watchpoint : unit
 
   method virtual mem_val_as_string : int64 -> Vine.typ -> string
@@ -488,6 +511,8 @@ class virtual fragment_machine = object
   method virtual set_iter_seed : int -> unit
 
   method virtual random_byte : int
+
+  method virtual random_word : int64
 
   method virtual finish_path : bool
 
@@ -509,6 +534,17 @@ class virtual fragment_machine = object
   method virtual load_long_concretize  : int64 -> bool -> string -> int64
 
   method virtual make_sink_region : string -> int64 -> unit
+
+  method virtual add_extra_store_hook : (int64 -> int -> unit) -> unit
+  method virtual run_store_hooks  : int64 -> int -> unit
+  method virtual note_first_branch : unit
+  method virtual before_first_branch : bool
+  method virtual get_start_eip : int64
+  method virtual set_start_eip : int64 -> unit
+
+  method virtual schedule_proc : unit
+  method virtual maybe_switch_proc : int64 -> int64 option
+  method virtual alloc_proc : (unit -> unit) -> unit
 end
 
 module FragmentMachineFunctor =
@@ -518,7 +554,7 @@ struct
   module FormMan = FormulaManagerFunctor(D)
 
   let change_some_short_bytes form_man d bytes construct =
-    assert(Array.length bytes = 2);
+    g_assert(Array.length bytes = 2) 100 "Fragment_machine.change_some_short_bytes";
     let select old = function
       | None -> old
       | Some x -> construct x
@@ -530,7 +566,7 @@ struct
       form_man#simplify16 (D.reassemble16 b0 b1)
 
   let change_some_word_bytes form_man d bytes construct =
-    assert(Array.length bytes = 4);
+    g_assert(Array.length bytes = 4) 100 "Fragment_machine.change_some_word_bytes";
     let select old = function
       | None -> old
       | Some x -> construct x
@@ -547,7 +583,7 @@ struct
 	(D.reassemble32 (D.reassemble16 b0 b1) (D.reassemble16 b2 b3))
 
   let change_some_long_bytes form_man d bytes construct =
-    assert(Array.length bytes = 8);
+    g_assert(Array.length bytes = 8) 100 "Fragment_machine.change_some_long_bytes";
     let select old = function
       | None -> old
       | Some x -> construct x
@@ -573,42 +609,122 @@ struct
 	   (D.reassemble32 (D.reassemble16 b0 b1) (D.reassemble16 b2 b3))
 	   (D.reassemble32 (D.reassemble16 b4 b5) (D.reassemble16 b6 b7)))
 
-  class frag_machine = object(self)
-    val mem = (new GM.granular_second_snapshot_memory
-		 (new GM.granular_snapshot_memory
-		    (new GM.concrete_maybe_adaptor_memory
-		       (new string_maybe_memory))
-		    (new GM.granular_hash_memory))
-		 (new GM.granular_hash_memory))
+  class frag_machine = object(self)	
+    val mutable mem = (new GM.granular_second_snapshot_memory
+			 (new GM.granular_snapshot_memory
+			    (new GM.concrete_maybe_adaptor_memory
+			       (new string_maybe_memory))
+			    (new GM.granular_hash_memory))
+			 (new GM.granular_hash_memory))
 
     val form_man = new FormMan.formula_manager
     method get_form_man = form_man
 
-    val reg_store = V.VarHash.create 100
+    val mutable reg_store = V.VarHash.create 100
     val reg_to_var = Hashtbl.create 100
     val temps = V.VarHash.create 100
+				
     val mutable mem_var = V.newvar "mem" (V.TMem(V.REG_32, V.Little))
     val mutable frag = ([], [])
     val mutable insns = []
 
     val mutable snap = (V.VarHash.create 1, V.VarHash.create 1)
 
+    val mutable before_first_branch_flag = true
+    (* we want to ask for dt depth from other fragment machines in
+       log_fuzz_restart in exec_fuzzloop, but didn't want to expose the
+       decsion tree in any way.  Instead, we just return a nonsense value as
+       frag_machine doesn't know how deep it is, but needs to be
+       non-virtual. JTT *)
+    method get_depth = ~-1
+    method note_first_branch = before_first_branch_flag <- false
+    method before_first_branch = before_first_branch_flag
+
+    method private concretize8 base_addr offset =
+      D.to_concrete_8 (mem#load_byte
+			 (Int64.add base_addr
+			    (Int64.of_int offset)))
+
+    (* Note that this is both mutable and a ref. The mutability comes
+       from it switching when we switch processes. The ref is so that
+       the copy currently in use and the copy saved in the proc_list
+       can be updated in sync.
+    *)
+    val mutable special_handler_list_ref = ref ([] : #special_handler list)
+
+    val mutable proc_list = []
+    initializer proc_list <- [mem, reg_store, special_handler_list_ref]
+    val mutable cur_pid = 0
+
+    method private switch_proc pid =
+      g_assert(pid < List.length proc_list) 50 "FM.switch_proc";
+      cur_pid <- pid;
+      let (mem', reg_store', shlr') = List.nth proc_list pid in
+	mem <- mem';
+	reg_store <- reg_store';
+	special_handler_list_ref <- shlr'
+
+    val mutable next_pid = None
+
+    method schedule_proc =
+      let pid' = (cur_pid + 1) mod (List.length proc_list) in
+	next_pid <- Some pid'
+
+    method maybe_switch_proc old_eip =
+      match next_pid with
+	| Some pid' ->
+	    next_pid <- None;
+	    self#set_eip old_eip;
+	    self#switch_proc pid';
+	    Some self#get_eip
+	| None -> None
+
+    method alloc_proc fn =
+      let mem' = (new GM.granular_second_snapshot_memory
+		    (new GM.granular_snapshot_memory
+		       (new GM.concrete_maybe_adaptor_memory
+			  (new string_maybe_memory))
+		       (new GM.granular_hash_memory))
+		    (new GM.granular_hash_memory)) and
+	  reg_store' = V.VarHash.create 100
+      in
+	V.VarHash.iter
+	  (fun k _ -> V.VarHash.replace reg_store' k (D.uninit))
+	  reg_store;
+	proc_list <- proc_list @ [(mem', reg_store', ref [])];
+	let new_pid = (List.length proc_list) - 1 and
+	    old_pid = cur_pid
+	in
+	  self#switch_proc new_pid;
+	  fn ();
+	  self#switch_proc old_pid
+
     method init_prog (dl, sl) =
-      List.iter
-	(fun ((n,s,t) as v) ->
-	   if s = "mem" then
-	     mem_var <- v
-	   else
-	     (V.VarHash.add reg_store v (D.uninit);
-	      Hashtbl.add reg_to_var (regstr_to_reg s) v)) dl;
-      self#set_frag (dl, sl);
-      let result = self#run () in
-	match result with
-	  | "fallthrough" -> ()
-	  | _ -> failwith "Initial program should fall through"
+      let add_reg ((n,s,t) as v) =
+	if s = "mem"
+	then mem_var <- v
+	else
+	  (V.VarHash.add reg_store v (D.uninit);
+	   Hashtbl.add reg_to_var (regstr_to_reg s) v)
+      in
+	List.iter add_reg dl;
+	self#set_frag (dl, sl);
+	let result = self#run () in
+	  match result with
+	    | "fallthrough" -> ()
+	    | _ -> failwith "Initial program should fall through"
 
     val mutable loop_cnt = 0L
     method get_loop_cnt = loop_cnt
+
+    val mutable pm = None
+
+    method set_pointer_management ptrmng =
+      pm <- Some ptrmng;
+      mem#set_pointer_management ptrmng
+
+    method get_pointer_management () =
+      pm
 
     method set_frag (dl, sl) =
       frag <- (dl, sl);
@@ -619,6 +735,16 @@ struct
 
     method concretize_misc = ()
 
+    val mutable extra_store_hooks = []
+
+    method add_extra_store_hook f = 
+	extra_store_hooks <- f :: extra_store_hooks
+	
+    method run_store_hooks s_addr size =
+	let apply_store_hook fn =
+		(fn s_addr size) in
+	List.iter apply_store_hook extra_store_hooks	 
+    	
     val mutable extra_eip_hooks = []
 
     method add_extra_eip_hook f =
@@ -629,6 +755,58 @@ struct
     val mutable deferred_start_symbolic = None
 
     val mutable insn_count = 0L
+    val mutable event_count = 0
+
+    val event_details = Hashtbl.create 11
+
+    (* This replicates the old behavior where information about
+       different events was combined. Ideally we'll remove it later. *)
+    val merged_event_details = Hashtbl.create 21
+
+    method add_event_detail k v =
+      Hashtbl.replace event_details k v;
+      Hashtbl.replace merged_event_details k v
+
+    val mutable event_history = []
+
+    method get_event_history : (string * Yojson.Safe.json) list =
+      let rec nth_head n l = match (n, l) with
+	| (_, []) -> []
+	| (0, _) -> []
+	| (n, f :: r) -> f :: (nth_head (n - 1) r)
+      in
+      let full_length = List.length event_history in
+	if full_length > 1000 then
+	  Printf.eprintf "Event history has %d entries, only returning 1000\n"
+	    full_length;
+	List.rev (nth_head 1000 event_history)
+
+    method private event_to_history eip =
+      let hash_to_assoc h = 
+	Hashtbl.fold (fun k v l -> (k, v) :: l) h []
+      in
+      let json_addr i64 = `String (Printf.sprintf "0x%08Lx" i64)
+      in
+	if (Hashtbl.length event_details) != 0 then
+	  let eeip = ("event-eip", json_addr eip) in
+          let entry = ((Printf.sprintf "%Ld_%d" insn_count event_count),
+		       `Assoc (eeip :: (hash_to_assoc event_details)))
+	  in
+	    if event_count < 100 then
+              event_history <- entry :: event_history
+	    else if event_count = 100 then
+	      Printf.eprintf
+		"Throttling at 100 events from instruction %Ld (0x%08Lx)\n"
+		insn_count eip
+
+    method finalize_event =
+      self#event_to_history self#get_eip;
+      Hashtbl.clear event_details;
+      event_count <- event_count + 1
+
+    method get_event_details =
+      self#event_to_history self#get_eip;
+      merged_event_details
 
     val range_opts_tbl = Hashtbl.create 2
 
@@ -638,26 +816,26 @@ struct
     method eip_hook eip =
       (* Shouldn't be needed; we instead simplify the registers when
 	 writing to them: *)
+      let apply_eip_hook fn =
+	 (fn (self :> fragment_machine) eip) in
       (* self#simplify_regs; *)
-      (match deferred_start_symbolic with
-	 | Some setup ->
-	     deferred_start_symbolic <- None;
-	     raise (StartSymbolic(eip, setup))
-	 | None -> ());
-      if !opt_trace_registers then
-	self#print_regs;
-      if !opt_trace_eip then
-	Printf.printf "EIP is 0x%08Lx\n" eip;
-      (if !opt_trace_unique_eips then
-	 (if Hashtbl.mem unique_eips eip then
-	    ()
-	  else
-	    (Printf.printf "Saw new EIP 0x%08Lx\n" eip;
-	     Hashtbl.add unique_eips eip ())));
+       (match deferred_start_symbolic with
+       | Some setup ->
+	 deferred_start_symbolic <- None;
+	 raise (StartSymbolic(eip, setup))
+       | None -> ());
+       if !opt_trace_registers then
+	 self#print_regs;
+       if !opt_trace_eip then
+	 Printf.eprintf "EIP is 0x%08Lx\n" eip;
+       insn_count <- Int64.succ insn_count;
+       (if !opt_trace_unique_eips then
+	   (if not (Hashtbl.mem unique_eips eip) then
+	       (Printf.eprintf "Saw new EIP 0x%08Lx\n" eip;
+		Hashtbl.add unique_eips eip ())));
       (* Libasmir.print_disasm_rawbytes Libasmir.Bfd_arch_i386 eip insn_bytes;
 	 print_string "\n"; *)
-      List.iter (fun fn -> (fn (self :> fragment_machine) eip))
-	extra_eip_hooks;
+      List.iter apply_eip_hook extra_eip_hooks;
       let control_range_opts opts_list range_val other_val =
 	List.iter (
 	  fun (opt_str, eip1, eip2) ->
@@ -669,7 +847,11 @@ struct
 	) opts_list in
       control_range_opts !opt_turn_opt_off_range false true;
       control_range_opts !opt_turn_opt_on_range true false;
-      self#watchpoint
+      self#watchpoint;
+      self#event_to_history eip;
+      Hashtbl.clear event_details;
+      event_count <- 0;
+      ()
 
     method get_eip =
       match !opt_arch with
@@ -695,6 +877,16 @@ struct
     val mutable call_stack = []
 
     method private trace_callstack last_insn last_eip eip =
+      let rec is_sorted = function
+	| (s1, _, _, _) :: (((s2, _, _, _) :: _) as rest) ->
+	    if s1 < s2 then
+	      is_sorted rest
+	    else
+	      false
+	| [_]
+	| []
+	    -> true
+      in
       let pop_callstack esp =
 	while match call_stack with
 	  | (old_esp, _, _, _) :: _ when old_esp < esp -> true
@@ -716,12 +908,20 @@ struct
       let kind =
 	match !opt_arch with
 	  | X86 | X64 ->
-	      let s = last_insn ^ "    " in
-		if (String.sub s 0 4) = "call" then
+	      let s = last_insn ^ "        " in
+		if (String.sub s 0 4) = "call" &&
+		  (Int64.sub eip last_eip) <> 5L then
+		    (* Call with a direct target right after the call
+		       is essentially "push %eip", and usually used for PIC
+		       setup instead of a real call. *)
 		  "call"
 		else if ((String.sub s 0 3) = "ret")
                   || ((String.length s >= 8) &&  ((String.sub s 0 8) = "repz ret"))
                 then
+		  "return"
+		else if (String.sub s 0 8) = "repz ret" then
+		  (* "repz ret" is a weird historical synonym for "ret"
+		     that was once faster on some processors in some cases *)
 		  "return"
 		else if (String.sub s 0 3) = "jmp" then
 		  "unconditional jump"
@@ -739,22 +939,34 @@ struct
 	      let depth = List.length call_stack and
 		  ret_addr = get_retaddr esp
 	      in
-		for i = 0 to depth - 1 do Printf.printf " " done;
-		Printf.printf
+		for i = 0 to depth - 1 do Printf.eprintf " " done;
+		Printf.eprintf
 		  "Call from 0x%08Lx to 0x%08Lx (return to 0x%08Lx)\n"
 		  last_eip eip ret_addr;
 		call_stack <- (esp, last_eip, eip, ret_addr) :: call_stack;
+		(* If we had a command-line option for expensive sanity
+		   checks, we could use it here. For now, just comment it
+		   out: *)
+		if false then
+		  g_assert(is_sorted call_stack) 100 "Fragment_machine.trace_call_stack";
 	  | "return" ->
 	      let esp = self#get_esp in
 		pop_callstack (Int64.sub esp size);
+		if false then
+		  g_assert(is_sorted call_stack) 100 "Fragment_machine.trace_call_stack";
 		let depth = List.length call_stack in
-		  for i = 0 to depth - 2 do Printf.printf " " done;
-		  Printf.printf "Return from 0x%08Lx to 0x%08Lx\n"
+		  for i = 0 to depth - 2 do Printf.eprintf " " done;
+		  Printf.eprintf "Return from 0x%08Lx to 0x%08Lx\n"
 		    last_eip eip;
 		  pop_callstack esp;
+		  if false then
+		    g_assert(is_sorted call_stack) 100 "Fragment_machine.trace_call_stack";
 	  | _ -> ()
 
     method jump_hook last_insn last_eip eip =
+      (* I think this might be the right place to add the indirect table updates
+	 JTT *)
+      Indirect_target_logger.add last_eip eip;
       if !opt_trace_callstack then
 	self#trace_callstack last_insn last_eip eip
 
@@ -766,26 +978,27 @@ struct
       = ()
 
     method private on_missing_zero_m (m:GM.granular_memory) =
-      m#on_missing
-	(fun size _ -> match size with
-	   | 8  -> D.from_concrete_8  0
-	   | 16 -> D.from_concrete_16 0
-	   | 32 -> D.from_concrete_32 0L
-	   | 64 -> D.from_concrete_64 0L
-	   | _ -> failwith "Bad size in on_missing_zero")
+      let size_converter size _ =
+	match size with
+	| 8  -> D.from_concrete_8  0
+	| 16 -> D.from_concrete_16 0
+	| 32 -> D.from_concrete_32 0L
+	| 64 -> D.from_concrete_64 0L
+	| _ -> failwith "Bad size in on_missing_zero" in
+      m#on_missing size_converter 
 
     method on_missing_zero =
       self#on_missing_zero_m (mem :> GM.granular_memory)
 
     method private on_missing_symbol_m (m:GM.granular_memory) name =
-      m#on_missing
-	(fun size addr -> 
-	   match size with
-	     | 8  -> form_man#fresh_symbolic_mem_8  name addr
-	     | 16 -> form_man#fresh_symbolic_mem_16 name addr
-	     | 32 -> form_man#fresh_symbolic_mem_32 name addr
-	     | 64 -> form_man#fresh_symbolic_mem_64 name addr
-	     | _ -> failwith "Bad size in on_missing_symbol")
+      let size_converter size addr =
+	match size with
+	| 8  -> form_man#fresh_symbolic_mem_8  name addr
+	| 16 -> form_man#fresh_symbolic_mem_16 name addr
+	| 32 -> form_man#fresh_symbolic_mem_32 name addr
+	| 64 -> form_man#fresh_symbolic_mem_64 name addr
+	| _ -> failwith "Bad size in on_missing_symbol" in
+      m#on_missing size_converter
 
     method on_missing_symbol =
       self#on_missing_symbol_m (mem :> GM.granular_memory) "mem"
@@ -1367,18 +1580,18 @@ struct
       D.to_string_64 (self#get_int_var (Hashtbl.find reg_to_var r))
 
     method private print_reg32 str r = 
-	Printf.printf "%s: " str;
-	Printf.printf "%s\n" (self#printable_word_reg r)
+	Printf.eprintf "%s: " str;
+	Printf.eprintf "%s\n" (self#printable_word_reg r)
      
     method private print_reg1 str r = 
-	Printf.printf "%s: " str;
-	Printf.printf "%s\n"
+	Printf.eprintf "%s: " str;
+	Printf.eprintf "%s\n"
 	  (D.to_string_1 
 	     (self#get_int_var (Hashtbl.find reg_to_var r)))
 
     method private print_reg64 str r =
-	Printf.printf "%s: " str;
-	Printf.printf "%s\n" (self#printable_long_reg r)
+	Printf.eprintf "%s: " str;
+	Printf.eprintf "%s\n" (self#printable_long_reg r)
 
     method private print_x87_fpreg idx reg tag =
       let val_d = self#get_int_var (Hashtbl.find reg_to_var reg) in
@@ -1388,14 +1601,14 @@ struct
       with
 	| NotConcrete(_) -> ""
       in
-	(Printf.printf "FP%d[%s]: %s%s\n" idx
+	(Printf.eprintf "FP%d[%s]: %s%s\n" idx
 	   (D.to_string_8
 	      (self#get_int_var (Hashtbl.find reg_to_var tag)))
 	   (D.to_string_64 val_d)) as_float
 
     method private print_reg128 str rh rl =
-      Printf.printf "%s: " str;
-      Printf.printf "%s %s\n"
+      Printf.eprintf "%s: " str;
+      Printf.eprintf "%s %s\n"
 	(D.to_string_64
 	   (self#get_int_var (Hashtbl.find reg_to_var rh)))
 	(D.to_string_64
@@ -1617,17 +1830,41 @@ struct
 	| X64 -> self#simplify_x64_regs
 	| ARM -> self#simplify_arm_regs
 
-    method store_byte  addr b = mem#store_byte  addr b
-    method store_short addr s = mem#store_short addr s
-    method store_word  addr w = mem#store_word  addr w
-    method store_long  addr l = mem#store_long  addr l
+    method store_byte ?(prov = Interval_tree.Internal) addr b = 
+	mem#store_byte ~prov addr b;
+	self#run_store_hooks addr 8
+	
+    method store_short ?(prov = Interval_tree.Internal) addr s = 
+      mem#store_short ~prov addr s;
+      self#run_store_hooks addr 16
+	
+    method store_word ?(prov = Interval_tree.Internal) addr w =
+	mem#store_word ~prov addr w;
+	self#run_store_hooks addr 32
+	
+    method store_long ?(prov = Interval_tree.Internal) addr l = 
+	mem#store_long ~prov addr l;
+	self#run_store_hooks addr 64
 
-    method store_byte_conc  addr b = mem#store_byte addr (D.from_concrete_8 b)
-    method store_short_conc addr s = mem#store_short addr(D.from_concrete_16 s)
-    method store_word_conc  addr w = mem#store_word addr (D.from_concrete_32 w)
-    method store_long_conc  addr l = mem#store_long addr (D.from_concrete_64 l)
+    method store_byte_conc ?(prov = Interval_tree.Internal) addr b =
+	mem#store_byte ~prov addr (D.from_concrete_8 b);
+	self#run_store_hooks addr 8
+	
+    method store_short_conc ?(prov = Interval_tree.Internal) addr s =
+	mem#store_short ~prov addr(D.from_concrete_16 s);
+	self#run_store_hooks addr 16
+	
+    method store_word_conc ?(prov = Interval_tree.Internal) addr w =
+      mem#store_word ~prov addr (D.from_concrete_32 w);
+      self#run_store_hooks addr 32
+	
+    method store_long_conc ?(prov = Interval_tree.Internal) addr l =
+	mem#store_long ~prov addr (D.from_concrete_64 l);
+	self#run_store_hooks addr 64
 
-    method store_page_conc  addr p = mem#store_page addr p
+    method store_page_conc  addr p =
+	mem#store_page addr p;
+	self#run_store_hooks addr 4096
 
     method private load_byte  addr = mem#load_byte  addr
     method private load_short addr = mem#load_short addr
@@ -1659,33 +1896,58 @@ struct
 	setup ()
 
     method start_symbolic =
-      mem#inner_make_snap ();
+      List.iter (fun (m, _, _) -> m#inner_make_snap ()) proc_list;
       started_symbolic <- true
 
-    val mutable special_handler_list = ([] : #special_handler list)
+    method special_handlers_state_json : Yojson.Safe.json =
+      `List
+	(List.fold_left
+	   (fun l sh ->
+	      match sh#state_json with
+		| Some j -> j :: l
+		| None -> l) [] !special_handler_list_ref )
+
+    val mutable start_eip = 0L
+    method get_start_eip = start_eip
+    method set_start_eip new_eip = 
+	start_eip <- new_eip
+
+    val mutable snap_insn_count = 0L
 
     method make_snap () =
-      mem#make_snap ();
+      List.iter (fun (m, _, _) -> m#make_snap ()) proc_list;
+      (* XXX need to save the other reg_stores in proc_list too *)
       snap <- (V.VarHash.copy reg_store, V.VarHash.copy temps);
-      List.iter (fun h -> h#make_snap) special_handler_list
+      snap_insn_count <- insn_count;
+      let snap_handler h = h#make_snap in
+	List.iter snap_handler !special_handler_list_ref
 
     val mutable fuzz_finish_reasons = []
+    val mutable reason_warned = false
     val mutable disqualified = false
 
     method finish_fuzz s =
       if not disqualified then
-	(fuzz_finish_reasons <- s :: fuzz_finish_reasons;
-	 if !opt_finish_immediately then
+        (if !opt_finish_immediately then
 	   (Printf.eprintf "Finishing (immediately), %s\n" s;
+	    fuzz_finish_reasons <- s :: fuzz_finish_reasons;
 	    raise FinishNow);
 	 if !opt_trace_stopping then
-	   Printf.printf "Final iteration, %s\n" s)
+	   Printf.eprintf "Final iteration (%d previous reasons), %s\n"
+	     (List.length fuzz_finish_reasons) s;
+	 if List.length fuzz_finish_reasons < 15 then
+	   fuzz_finish_reasons <- s :: fuzz_finish_reasons
+	 else
+	   if !opt_trace_stopping || reason_warned then (
+	     reason_warned <- true;
+	     Printf.eprintf ("fuzz_finish_reasons list exceeded 15..."
+			    ^^" ignoring new reason\n")))
 
     method unfinish_fuzz s =
       fuzz_finish_reasons <- [];
       disqualified <- true;
       if !opt_trace_stopping then
-	Printf.printf "Non-finish condition %s\n" s
+	Printf.eprintf "Non-finish condition %s\n" s
 
     method finish_reasons =
       if disqualified then
@@ -1694,33 +1956,45 @@ struct
 	fuzz_finish_reasons
 
     method reset () =
-      mem#reset ();
+      let reset h = h#reset in
+      List.iter (fun (m, _, _) -> m#reset ()) proc_list;
+      (* XXX need to restore the other reg_stores in proc_list too *)
       (match snap with (r, t) ->
 	 move_hash r reg_store;
 	 move_hash t temps);
+      insn_count <- snap_insn_count;
       fuzz_finish_reasons <- [];
       disqualified <- false;
-      List.iter (fun h -> h#reset) special_handler_list
+      Hashtbl.clear event_details;
+      event_history <- [];
+      List.iter reset !special_handler_list_ref
 
     method add_special_handler (h:special_handler) =
-      special_handler_list <- h :: special_handler_list
+      special_handler_list_ref := h :: !special_handler_list_ref
+
+    (* At the moment we're assuming these are simple ones that don't
+       need to be notified of snapshots or produce JSON output. *)
+    val mutable universal_special_handlers = []
+
+    method add_universal_special_handler (h:special_handler) =
+      universal_special_handlers <- h :: universal_special_handlers
 
     method handle_special str =
-      let rec loop =
+      let rec find_some_sl =
 	function
 	  | h :: rest ->
 	      (match h#handle_special str with
 		 | (Some sl) as slr -> slr
-		 | None -> loop rest)
+		 | None -> find_some_sl rest)
 	  | [] -> None
       in
-	loop special_handler_list
+        find_some_sl (!special_handler_list_ref @ universal_special_handlers)
 
     method private get_int_var ((_,vname,ty) as var) =
       try
 	let v = V.VarHash.find reg_store var in
 	  (* if v = D.uninit then
-	     Printf.printf "Warning: read uninitialized register %s\n"
+	     Printf.eprintf "Warning: read uninitialized register %s\n"
 	     vname; *)
 	  v
       with
@@ -1761,13 +2035,30 @@ struct
       form_man#concolic_eval_64
 	(self#get_int_var (Hashtbl.find reg_to_var reg))
 
-    method private set_int_var ((_,_,ty) as var) value =
+    method private set_int_var ((reg_num, reg_name, typ) as var) value =
+      (* var is a triple where the last element is the type information *)
+      (* rewrite this call -- JTT *)
+      (*
+      (match typ with
+      | V.REG_16 -> Printf.eprintf "Storing 16 : %d\n" (D.to_concrete_16 value)
+      | V.REG_32 -> Printf.eprintf "Storing 32 : %s\n" (Int64.to_string
+							 (D.to_concrete_32 value))
+      | _ -> ());
+      *)
+      if reg_name = (reg_to_regstr R_ESP) then (
+        let int64Value = (D.to_concrete_32 value) in
+        (match pm with
+        | Some ptrmng -> ptrmng#update_stack_end int64Value;
+        | None -> ());
+      );
+
       try
 	ignore(V.VarHash.find reg_store var);
 	V.VarHash.replace reg_store var value
       with
 	  Not_found ->
-	    V.VarHash.replace temps var value
+	    V.VarHash.replace temps var value;
+
 
     method set_bit_var reg v =
       self#set_int_var (Hashtbl.find reg_to_var reg) (D.from_concrete_1 v)
@@ -1849,6 +2140,12 @@ struct
 	  (form_man#fresh_region_base_concolic name addr);
 	symbol_uniq <- symbol_uniq + 1
 
+    method private raise_null_deref addr =
+      raise (NullDereference
+               { eip_of_deref = self#get_eip;
+                 last_set_to_null = Int64.sub Int64.zero Int64.one;
+                 addr_derefed = addr; })
+
     (* This relatively simple-looking "handle_load" method is used in
        the concrete-only "vinegrind" tool. In full-fledged FuzzBALL it's
        is overridden by a more complicated version in
@@ -1864,14 +2161,14 @@ struct
 	   | _ -> failwith "Unsupported memory type") in
 	(if !opt_trace_loads then
 	   (if !opt_trace_eval then
-	      Printf.printf "    "; (* indent to match other details *)
-	    Printf.printf "Load from conc. mem ";
-	    Printf.printf "%08Lx = %s" addr (to_str v);
+	      Printf.eprintf "    "; (* indent to match other details *)
+	    Printf.eprintf "Load from conc. mem ";
+	    Printf.eprintf "%08Lx = %s" addr (to_str v);
 	    (if !opt_use_tags then
-	       Printf.printf " (%Ld @ %08Lx)" (D.get_tag v) (self#get_eip));
-	    Printf.printf "\n"));
+	       Printf.eprintf " (%Ld @ %08Lx)" (D.get_tag v) (self#get_eip));
+	    Printf.eprintf "\n"));
 	if addr >= 0L && addr < 4096L then
-	  raise NullDereference;
+	  self#raise_null_deref addr;
 	(v, ty)
 
     (* This relatively simple-looking "handle_store" method is used in
@@ -1891,14 +2188,14 @@ struct
       in
 	if !opt_trace_stores then
 	  (if !opt_trace_eval then
-	     Printf.printf "    "; (* indent to match other details *)
-	   Printf.printf "Store to conc. mem ";
-	   Printf.printf "%08Lx = %s" addr (to_str value);
+	     Printf.eprintf "    "; (* indent to match other details *)
+	   Printf.eprintf "Store to conc. mem ";
+	   Printf.eprintf "%08Lx = %s" addr (to_str value);
 	   (if !opt_use_tags then
-	      Printf.printf " (%Ld @ %08Lx)" (D.get_tag value) (self#get_eip));
-	   Printf.printf "\n");
+	      Printf.eprintf " (%Ld @ %08Lx)" (D.get_tag value) (self#get_eip));
+	   Printf.eprintf "\n");
 	if addr >= 0L && addr < 4096L then
-	  raise NullDereference
+	  self#raise_null_deref addr
 
     method private maybe_concretize_binop op v1 v2 ty1 ty2 =
       (v1, v2)
@@ -1909,12 +2206,16 @@ struct
 	   | V.PLUS | V.MINUS | V.TIMES
 	   | V.DIVIDE | V.SDIVIDE | V.MOD | V.SMOD
 	   | V.BITAND | V.BITOR | V.XOR
-	       -> assert(ty1 = ty2); ty1
+	       -> g_assert(ty1 = ty2) 100
+	       "Fragment_machine.eval_binop arith same type";
+		 ty1
 	   | V.LSHIFT | V.RSHIFT | V.ARSHIFT
 	       -> ty1
 	   | V.CONCAT -> assert(ty1 = ty2); V.double_width ty1
 	   | V.EQ | V.NEQ | V.LT | V.LE | V.SLT | V.SLE
-	       -> assert(ty1 = ty2); V.REG_1) in
+	       -> g_assert(ty1 = ty2) 100
+	       "Fragment_machine.eval_binop compare same type";
+		 V.REG_1) in
       let func =
 	(match (op, ty1) with
 	   | (V.PLUS, V.REG_1)  -> D.plus1 
@@ -2024,9 +2325,9 @@ struct
       let ty =
 	(match op with
 	   | V.FPLUS | V.FMINUS | V.FTIMES | V.FDIVIDE
-	       -> assert(ty1 = ty2); ty1
+	       -> g_assert(ty1 = ty2) 100 "Fragment_machine.eval_fbinop"; ty1
 	   | V.FEQ | V.FNEQ | V.FLT | V.FLE
-	       -> assert(ty1 = ty2); V.REG_1) in
+	       -> g_assert(ty1 = ty2) 100 "Fragment_machine.eval_fbinop"; V.REG_1) in
       let func =
 	(match (op, ty1) with
 	   | (V.FPLUS, V.REG_32) -> D.fplus32
@@ -2065,7 +2366,7 @@ struct
 	   | _ -> failwith "unexpected unop/type in eval_int_exp_ty")
       in
 	if !opt_trace_eval then
-	  Printf.printf "    %s(%s) = %s\n" (V.unop_to_string op)
+	  Printf.eprintf "    %s(%s) = %s\n" (V.unop_to_string op)
 	    (D.to_string_32 v1) (D.to_string_32 result);
 	result, ty1
 
@@ -2121,7 +2422,12 @@ struct
 	  | (V.CAST_HIGH, V.REG_16, V.REG_8)  -> D.cast16h8
 	  | (V.CAST_HIGH, V.REG_16, V.REG_1)  -> D.cast16h1
 	  | (V.CAST_HIGH, V.REG_8,  V.REG_1)  -> D.cast8h1
-	  | _ -> failwith "bad cast kind in eval_int_exp_ty"
+	  | _ -> 
+	    failwith (Printf.sprintf
+			"bad cast kind in eval_int_exp_ty: %s %s %s"
+			(V.cast_to_string kind)
+			(V.typ_to_string ty)
+			(V.typ_to_string ty1))
       in
 	((func v1), ty)
 
@@ -2218,7 +2524,7 @@ struct
 	| V.Lval(V.Temp((_,s,ty) as var)) ->
 	    let v = self#get_int_var var in
 	      if !opt_trace_eval then
-		Printf.printf "    %s is %s\n" s (D.to_string_32 v);
+		Printf.eprintf "    %s is %s\n" s (D.to_string_32 v);
 	      (v, ty)
 	| V.Lval(V.Mem(memv, idx, ty)) ->
 	    self#handle_load idx ty
@@ -2241,8 +2547,8 @@ struct
               (* symbolic execution evaluates both sides *)
 	         let (v_t, ty_t) = self#eval_int_exp_ty true_e and
 		     (v_f, ty_f) = self#eval_int_exp_ty false_e in
-	         assert(ty_c = V.REG_1);
-	         assert(ty_t = ty_f);
+		 g_assert(ty_c = V.REG_1) 100 "Fragment_machine.eval_int_exp_ty";
+	         g_assert(ty_t = ty_f)100 "Fragment_machine.eval_int_exp_ty";
 	         self#eval_ite v_c v_t v_f ty_t)
 	(* XXX move this to something like a special handler: *)
 	| V.Unknown("rdtsc") -> ((D.from_concrete_64 1L), V.REG_64) 
@@ -2344,13 +2650,13 @@ struct
 	  | [] -> "fallthrough"
 	  | st :: rest ->
 	      if !opt_trace_stmts then
-		(Printf.printf "  %08Lx."
+		(Printf.eprintf "  %08Lx."
 		   (try self#get_eip with NotConcrete(_) -> 0L);
 		 (if stmt_num = -1 then
-		    Printf.printf "   "
+		    Printf.eprintf "   "
 		  else
-		    Printf.printf "%03d" stmt_num);
-		 Printf.printf " %s\n" (stmt_to_string_compact st));
+		    Printf.eprintf "%03d" stmt_num);
+		 Printf.eprintf " %s\n" (stmt_to_string_compact st));
 	      stmt_num <- stmt_num + 1;
 	      (match st with
 		 | V.Jmp(l) -> jump (self#eval_label_exp l)
@@ -2377,7 +2683,7 @@ struct
 		 | V.Move(V.Temp((n,s,t) as v), e) ->
 		     let rhs = self#eval_int_exp_simplify e in
 		     let trace_eval () =
-		       Printf.printf "    %s <- %s\n" s (D.to_string_32 rhs)
+		       Printf.eprintf "    %s <- %s\n" s (D.to_string_32 rhs)
 		     in
 		       if !opt_trace_eval then
 			 trace_eval ()
@@ -2402,9 +2708,12 @@ struct
 			| Some sl -> 
 			    loop (sl @ rest)
 			| None ->
-			    Printf.printf "Unhandled special %s near 0x%Lx (%s)\n"
-			      str (self#get_eip) last_insn;
-			    failwith "Unhandled special")
+			    if !opt_noop_unhandled_special then
+			      loop rest
+			    else  
+			      (Printf.eprintf "Unhandled special |%s| near 0x%Lx (%s)\n"
+				 str (self#get_eip) last_insn;
+			       failwith "Unhandled special"))
 		 | V.Label(l) ->
 		     if ((String.length l > 5) && 
 			   (String.sub l 0 5) = "pc_0x") then
@@ -2416,7 +2725,7 @@ struct
 			     translate one instruction at a time), so it's
 			     an overapproximation. *)
 			  if saw_jump then
-			    self#run_jump_hooks last_insn last_eip eip;
+			      self#run_jump_hooks last_insn last_eip eip;
 			  self#run_eip_hooks;
 			  stmt_num <- 1;
 			  last_eip <- eip;
@@ -2437,7 +2746,7 @@ struct
 		 | V.Attr(st, _) -> loop (st :: rest)
 		 | V.Assert(e) ->
 		     let v = self#eval_bool_exp e in
-		       assert(v);
+		       g_assert(v) 100 "Fragment_machine.run_sl";
 		       loop rest
 		 | V.Halt(e) ->
 		     let v = D.to_concrete_32 (self#eval_int_exp e) in
@@ -2446,10 +2755,12 @@ struct
 	stmt_num <- -1;
 	loop sl
 
-    method run () = self#run_sl (fun lab -> true) insns
+    method run () =
+      self#run_sl is_true insns
 
     method run_to_jump () =
-      self#run_sl (fun lab -> (String.sub lab 0 3) <> "pc_") insns
+      let check_for_pc lab = (String.sub lab 0 3) <> "pc_" in
+      self#run_sl check_for_pc insns
 
     method fake_call_to_from func_addr ret_addr =
       match !opt_arch with
@@ -2464,10 +2775,9 @@ struct
 	| _ -> failwith "Unsupported arch in fake_call_to_from"
 
     method disasm_insn_at eip = 
-      let bytes = Array.init 16
-	(fun i -> Char.chr (self#load_byte_conc
-			      (Int64.add eip (Int64.of_int i))))
-      in
+      let array_init i = Char.chr (self#load_byte_conc
+				     (Int64.add eip (Int64.of_int i))) in
+      let bytes = Array.init 16 array_init in
 	Libasmir.sprintf_disasm_rawbytes
 	  (libasmir_arch_of_execution_arch !opt_arch)
 	  false eip bytes
@@ -2492,16 +2802,19 @@ struct
 
     val mutable symbolic_string_id = 0
 
-    method make_symbolic_region base len varname pos =
+    method populate_symbolic_region ?(prov = Interval_tree.Internal) varname offset base len =
+      let ar = Array.create len (Vine.Name "stub") in
       for i = 0 to len - 1 do
-	self#store_byte (Int64.add base (Int64.of_int i))
-	  (form_man#fresh_symbolic_mem_8 varname (Int64.of_int (pos + i)))
-      done
+	let to_add = form_man#fresh_symbolic_mem_8 varname (Int64.of_int (i + offset)) in
+	self#store_byte ~prov (Int64.add base (Int64.of_int i)) to_add;
+	ar.(i) <- (D.to_symbolic_8 to_add);
+      done;
+      ar
 
     method make_fresh_symbolic_region base len =
       let varname = "input" ^ (string_of_int symbolic_string_id) in
-        symbolic_string_id <- symbolic_string_id + 1;
-        self#make_symbolic_region base len varname 0
+	symbolic_string_id <- symbolic_string_id + 1;
+	ignore(self#populate_symbolic_region varname 0 base len)
 
     method store_symbolic_cstr base len fulllen terminate =
       let varname = "input" ^ (string_of_int symbolic_string_id) ^ "_" in
@@ -2517,6 +2830,15 @@ struct
 	done;
 	if terminate then
 	  self#store_byte_idx base len 0
+
+    method populate_concolic_string ?(prov = Interval_tree.Internal) varname offset base str =
+      let len = String.length str in
+	for i = 0 to len - 1 do
+	  self#store_byte ~prov (Int64.add base (Int64.of_int i))
+	    (form_man#make_concolic_mem_8 varname
+	       (Int64.of_int (i + offset))
+	       (Char.code str.[i]))
+	done
 
     method store_concolic_cstr base str terminate =
       let len = String.length str in
@@ -2548,32 +2870,32 @@ struct
 	self#store_byte_idx base (2*len) 0;
 	self#store_byte_idx base (2*len + 1) 0
 
-    method store_symbolic_byte addr varname =
-      self#store_byte addr (form_man#fresh_symbolic_8 varname)
+    method store_symbolic_byte ?(prov = Interval_tree.Internal) addr varname =
+      self#store_byte ~prov addr (form_man#fresh_symbolic_8 varname)
 
-    method store_symbolic_short addr varname =
-      self#store_short addr (form_man#fresh_symbolic_16 varname)
+    method store_symbolic_short ?(prov = Interval_tree.Internal) addr varname =
+      self#store_short ~prov addr (form_man#fresh_symbolic_16 varname)
 
-    method store_symbolic_word addr varname =
-      self#store_word addr (form_man#fresh_symbolic_32 varname)
+    method store_symbolic_word ?(prov = Interval_tree.Internal) addr varname =
+      self#store_word ~prov addr (form_man#fresh_symbolic_32 varname)
 
-    method store_symbolic_long addr varname =
-      self#store_long addr (form_man#fresh_symbolic_64 varname)
+    method store_symbolic_long ?(prov = Interval_tree.Internal)  addr varname =
+      self#store_long ~prov addr (form_man#fresh_symbolic_64 varname)
 
-    method store_concolic_mem_byte addr varname idx b =
-      self#store_byte addr (form_man#make_concolic_mem_8 varname idx b)
+    method store_concolic_mem_byte ?(prov = Interval_tree.Internal) addr varname idx b =
+      self#store_byte ~prov addr (form_man#make_concolic_mem_8 varname idx b)
 
-    method store_concolic_byte addr varname i =
-      self#store_byte addr (form_man#make_concolic_8 varname i)
+    method store_concolic_byte ?(prov = Interval_tree.Internal) addr varname i =
+      self#store_byte addr ~prov (form_man#make_concolic_8 varname i)
 
-    method store_concolic_short addr varname i =
-      self#store_short addr (form_man#make_concolic_16 varname i)
+    method store_concolic_short ?(prov = Interval_tree.Internal) addr varname i =
+      self#store_short ~prov addr (form_man#make_concolic_16 varname i)
 
-    method store_concolic_word addr varname i64 =
-      self#store_word addr (form_man#make_concolic_32 varname i64)
+    method store_concolic_word ?(prov = Interval_tree.Internal) addr varname i64 =
+      self#store_word ~prov addr (form_man#make_concolic_32 varname i64)
 
-    method store_concolic_long addr varname i64 =
-      self#store_long addr (form_man#make_concolic_64 varname i64)
+    method store_concolic_long ?(prov = Interval_tree.Internal) addr varname i64 =
+      self#store_long ~prov addr (form_man#make_concolic_64 varname i64)
 
     method set_reg_conc_bytes reg byte_array =
       let change_func = match Array.length byte_array with
@@ -2585,7 +2907,7 @@ struct
       let var = Hashtbl.find reg_to_var reg in
       let old_d = self#get_int_var var in
       let new_d =
-	change_func old_d byte_array (fun b -> D.from_concrete_8 b)
+	change_func old_d byte_array D.from_concrete_8
       in
 	self#set_int_var var new_d
 
@@ -2598,26 +2920,16 @@ struct
       in
       let var = Hashtbl.find reg_to_var reg in
       let old_d = self#get_int_var var in
-      let new_d =
-	change_func old_d byte_array
-	  (fun (s,i,v) -> form_man#make_concolic_mem_8 s i v)
-      in
+      let concolicify (s,i,v) = form_man#make_concolic_mem_8 s i v in
+      let new_d = change_func old_d byte_array concolicify in
 	self#set_int_var var new_d
 
     method private assemble_concolic_exp exp 
       byte_vars short_vars word_vars long_vars =
-      let byte_ds =
-	List.map (fun (s, v) -> (s, form_man#make_concolic_8 s v))
-	  byte_vars in
-      let short_ds =
-	List.map (fun (s, v) -> (s, form_man#make_concolic_16 s v))
-	  short_vars in
-      let word_ds =
-	List.map (fun (s, v) -> (s, form_man#make_concolic_32 s v))
-	  word_vars in
-      let long_ds =
-	List.map (fun (s, v) -> (s, form_man#make_concolic_64 s v))
-	  long_vars in
+      let byte_ds  = List.map form_man#make_concolic_8_tuple byte_vars in
+      let short_ds = List.map form_man#make_concolic_16_tuple short_vars in
+      let word_ds  = List.map form_man#make_concolic_32_tuple word_vars in
+      let long_ds  = List.map form_man#make_concolic_64_tuple long_vars in
       let rec rw_loop e =
 	match e with
 	  | V.Unknown(s) ->
@@ -2703,20 +3015,16 @@ struct
       self#store_byte_idx (Int64.add base idx) (String.length str) 0
 
     method read_buf addr len =
-      Array.init len
-	(fun i -> Char.chr
-	   (D.to_concrete_8 (mem#load_byte (Int64.add addr (Int64.of_int i)))))
+      g_assert ((len >= 0) && (len < Sys.max_array_length)) 100 "Fragment_machine.read_buf";
+      Array.init len (fun i -> Char.chr (self#concretize8 addr i))
 
     method read_cstr addr =
-      let rec bytes_loop i =
-	let b = D.to_concrete_8 (mem#load_byte
-				   (Int64.add addr (Int64.of_int i)))
-	in
-	  if b = 0 then [] else b :: bytes_loop (i + 1)
-      in
-	String.concat ""
-	  (List.map (fun b -> String.make 1 (Char.chr b))
-	     (bytes_loop 0))
+      let rec read_loop i =
+	let b = self#concretize8 addr i in
+	if b = 0 (* found \0 *)
+	then []
+	else (String.make 1 (Char.chr b))::(read_loop (i + 1)) in
+      String.concat "" (read_loop 0)
 
     method zero_fill vaddr n =
       for i = 0 to n - 1 do
@@ -2733,7 +3041,7 @@ struct
       let rec loop ebp =
 	let (prev_ebp, prev_ebp_s) = read_addr ebp and
 	    (_, ret_addr_s) = read_addr (Int64.add ebp 4L) in
-	  Printf.printf "0x%08Lx %s %s\n" ebp prev_ebp_s ret_addr_s;
+	  Printf.eprintf "0x%08Lx %s %s\n" ebp prev_ebp_s ret_addr_s;
 	  if (prev_ebp <> 0L) then
 	    loop prev_ebp
       in
@@ -2766,9 +3074,11 @@ struct
 	| (v, V.REG_64) -> D.to_symbolic_64 v
 	| _ -> failwith "Unexpected type in eval_expr_to_symbolic_expr"
 
+    method eval_expr_from_ce ce e = form_man#eval_expr_from_ce ce e
+
     method watchpoint =
       match !opt_watch_expr with
-	| Some e -> Printf.printf "Watched expression %s = %s\n"
+	| Some e -> Printf.eprintf "Watched expression %s = %s\n"
 	    (match !opt_watch_expr_str with Some s -> s | None -> "???")
 	      (self#eval_expr_to_string e)
 	| None -> ()
@@ -2792,6 +3102,7 @@ struct
     method print_tree (oc:out_channel) = ()
     method set_iter_seed (i:int) = ()
     method random_byte = Random.int 256
+    method random_word = 0L
     method finish_path = false
     method after_exploration = ()
     method make_x86_segtables_symbolic = ()

@@ -64,7 +64,7 @@ class smtlib_batch_engine e_s_t fname = object(self)
       filenum <- filenum + 1;
       curr_fname <- pick_fresh_fname dir decorated_fname filenum;
       if !opt_trace_solver then
-	Printf.printf "Creating SMTLIB2 file: %s.smt2\n" curr_fname;
+	Printf.eprintf "Creating SMTLIB2 file: %s.smt2\n" curr_fname;
       curr_fname
 
   method private chan =
@@ -121,7 +121,7 @@ class smtlib_batch_engine e_s_t fname = object(self)
       self#visitor#declare_var_value var rhs
     with
       | V.TypeError(err) ->
-	  Printf.printf "Typecheck failure on %s: %s\n"
+	  Printf.eprintf "Typecheck failure on %s: %s\n"
 	    (V.exp_to_string rhs) err;
 	  failwith "Typecheck failure in assert_eq"
 
@@ -181,11 +181,12 @@ class smtlib_batch_engine e_s_t fname = object(self)
       | Z3 -> " -smt2 "
       | MATHSAT -> " -model "
     in
+    let extra_opt = extra_opt_options e_s_t in
     let from = if e_s_t = MATHSAT then "<" else "" in
-    let cmd = !opt_solver_path ^ base_opt ^ timeout_opt ^ from ^ curr_fname
-      ^ ".smt2 >" ^ curr_fname ^ ".smt2.out" in
+    let cmd = !opt_solver_path ^ base_opt ^ timeout_opt ^ extra_opt ^
+      from ^ curr_fname ^ ".smt2 >" ^ curr_fname ^ ".smt2.out" in
       if !opt_trace_solver then
-	Printf.printf "Solver command: %s\n" cmd;
+	Printf.eprintf "Solver command: %s\n" cmd;
       flush stdout;
       let rcode = Sys.command cmd in
       let results = open_in (curr_fname ^ ".smt2.out") in
@@ -199,9 +200,9 @@ class smtlib_batch_engine e_s_t fname = object(self)
 	      let first_assert = (String.sub result_s 0 3) = "ASS" in
 	      let result = match result_s with
 		| "unsat" -> Some true
-		| "Timed Out." -> Printf.printf "Solver timeout\n"; None
+		| "Timed Out." -> Printf.eprintf "Solver timeout\n"; None
 		| "unknown" when !opt_solver_timeout <> None ->
-		    Printf.printf "Solver failure, probably timeout\n"; None
+		    Printf.eprintf "Solver failure, probably timeout\n"; None
 		| "sat" -> Some false
 		| _ when first_assert -> Some false
 		| _ -> failwith "Unexpected first output line"
@@ -222,16 +223,16 @@ class smtlib_batch_engine e_s_t fname = object(self)
 		close_in results;
 		(result, ce_from_list (first_assign @ ce_list))
 	  | _ ->
-	      Printf.printf "Solver died with result code %d\n" rcode;
+	      Printf.eprintf "Solver died with result code %d\n" rcode;
 	      (match rcode with
 		 | 127 ->
 		     if !opt_solver_path = "stp" then
-		       Printf.printf
+		       Printf.eprintf
 			 "Perhaps you should set the -solver-path option?\n"
 		     else if String.contains !opt_solver_path '/' &&
 		       not (Sys.file_exists !opt_solver_path)
 		     then
-		       Printf.printf "The file %s does not appear to exist\n"
+		       Printf.eprintf "The file %s does not appear to exist\n"
 			 !opt_solver_path
 		 | 131 -> raise (Signal "QUIT")
 		 | _ -> ());
@@ -240,7 +241,7 @@ class smtlib_batch_engine e_s_t fname = object(self)
 
   method after_query save_results =
     if save_results then
-      Printf.printf "Solver query and results are in %s.smt2 and %s.smt2.out\n"
+      Printf.eprintf "Solver query and results are in %s.smt2 and %s.smt2.out\n"
 	curr_fname curr_fname
     else if not !opt_save_solver_files then
       (Sys.remove (curr_fname ^ ".smt2");

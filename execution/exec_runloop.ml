@@ -4,11 +4,13 @@
 
 module V = Vine
 
+open Exec_veritesting
 open Exec_exceptions
 open Exec_options
 open Frag_simplify
 open Fragment_machine
-open Exec_run_common
+open Exec_run_common 
+open Exec_veritesting
 
 let call_replacements fm last_eip eip =
   let (ret_reg, set_reg_conc, set_reg_sym, set_reg_fresh) =
@@ -58,64 +60,39 @@ let call_replacements fm last_eip eip =
       | _ -> failwith "Contradictory replacement options"
 
 let loop_detect = Hashtbl.create 1000
-
-let decode_insn_at fm gamma eipT =
-  try
-    let insn_addr = match !opt_arch with
-      | ARM ->
-	  (* For a Thumb instruction, change the last bit to zero to
-	     find the real instruction address *)
-	  if Int64.logand eipT 1L = 1L then
-	    Int64.logand eipT (Int64.lognot 1L)
-	  else
-	    eipT
-      | _ -> eipT
-    in
-    (* The number of bytes read must be long enough to cover any
-       single instruction. Naively you might think that 16 bytes
-       would be enough, but Valgrind client requests count as single
-       instructions for VEX, and they can be up to 19 bytes on
-       x86-64 and 20 bytes on ARM. *)
-    let bytes = Array.init 20
-      (fun i -> Char.chr (fm#load_byte_conc
-			    (Int64.add insn_addr (Int64.of_int i))))
-    in
-    let prog = decode_insn gamma eipT bytes in
-      prog
-  with
-      NotConcrete(_) ->
-	Printf.printf "Jump to symbolic memory 0x%08Lx\n" eipT;
-	raise IllegalInstruction
-
-let rec last l =
-  match l with
-    | [e] -> e
-    | a :: r -> last r
-    | [] -> failwith "Empty list in last"
-
-let rec decode_insns fm gamma eip k first =
-  if k = 0 then ([], []) else
-    let (dl, sl) = decode_insn_at fm gamma eip in
-      if
-	List.exists (function V.Special("int 0x80") -> true | _ -> false) sl
-      then
-	(* Make a system call be alone in its basic block *)
-	if first then (dl, sl) else ([], [])
-      else
-	match last (rm_unused_stmts sl) with
-	  | V.Jmp(V.Name(lab)) when lab <> "pc_0x0" ->
-	      let next_eip = label_to_eip lab in
-	      let (dl', sl') = decode_insns fm gamma next_eip (k - 1) false in
-		(dl @ dl', sl @ sl')
-	  | _ -> (dl, sl) (* end of basic block, e.g. indirect jump *)
-
-let bb_size = 1
-
+    
 let decode_insns_cached fm gamma eip =
-  with_trans_cache eip (fun () -> decode_insns fm gamma eip bb_size true)
+  let decode_call _ = decode_insns fm gamma eip !opt_bb_size
+  and veritest_call _ = find_veritesting_region fm gamma eip !opt_bb_size in
+  let (decls, stmts) as return =
+    match (some_none_trans_cache eip veritest_call) with
+    | None -> with_trans_cache eip decode_call
+    | Some progn -> progn in
+  if false then
+    begin
+      Printf.eprintf "Printing statement list:\n";
+      List.iter (fun s -> V.stmt_to_channel stdout s) stmts;
+      Printf.eprintf "End statement list: %d\n" (List.length stmts);
+      Printf.eprintf "Printing decls:\n";
+      List.iter (fun s -> V.decl_to_channel stdout s; Printf.eprintf "\n") decls;
+      Printf.eprintf "End decls\n";
+      flush stdout
+    end;
+  return
 
-let rec runloop (fm : fragment_machine) eip asmir_gamma until =
+
+let runloop (fm : fragment_machine) eip asmir_gamma until =
   let rec loop last_eip eip is_final_loop num_insns_executed =
+    (match fm#maybe_switch_proc eip with
+       | Some eip' ->
+	   clear_trans_cache (); (* drastic, better to make tagged *)
+	   loop (0L) eip' false num_insns_executed
+       | None -> ());
+    (* Currently disabled: advance the reset point if we've got symbolic
+       data but we haven't yet branched on it. *)
+    if false && fm#before_first_branch && fm#started_symbolic then (
+	fm#make_snap ();
+	fm#set_start_eip eip);
     (let old_count =
        (try
 	  Hashtbl.find loop_detect eip
@@ -127,8 +104,7 @@ let rec runloop (fm : fragment_machine) eip asmir_gamma until =
        (match !opt_iteration_limit_enforced with
        | Some lim -> if old_count > lim then raise TooManyIterations
        | _ -> ()););
-    let (dl, sl) = decode_insns_cached fm asmir_gamma eip in
-    let prog = (dl, sl) in
+    let (dl, sl) as prog = decode_insns_cached fm asmir_gamma eip in
       let prog' = match call_replacements fm last_eip eip with
 	| None -> prog
 	| Some thunk ->
@@ -142,24 +118,31 @@ let rec runloop (fm : fragment_machine) eip asmir_gamma until =
 	    in
 	      decode_insn asmir_gamma eip fake_ret
       in
-	if !opt_trace_insns then
-	  print_insns eip prog' None '\n';
-	if !opt_trace_ir then
-	  V.pp_program print_string prog';
+	if !opt_trace_insns
+	then print_insns eip prog' None '\n';
+	if !opt_trace_ir
+	then V.pp_program print_string prog';
 	fm#set_frag prog';
 	(* flush stdout; *)
-	let new_eip = label_to_eip (fm#run ()) in
+	let new_label = fm#run () in
+	let new_eip = 
+	  try 
+	    label_to_eip (new_label)
+	  with Failure s -> failwith (Printf.sprintf "Couldn't decode eip in runloop: %s" s) in
 	  if is_final_loop then
-	    Printf.printf "End jump to: %Lx\n" new_eip
+	    Printf.eprintf "End jump to: %Lx\n" new_eip
 	  else if num_insns_executed = !opt_insn_limit then
-	    Printf.printf "Stopping after %Ld insns\n" !opt_insn_limit
+	    Printf.eprintf "Stopping after %Ld insns\n" !opt_insn_limit
 	  else
 	    match (new_eip, until, !opt_trace_end_jump) with
-	      | (e1, e2, Some e3) when e1 = e3 ->
-	          loop eip new_eip true (Int64.succ num_insns_executed)
-	      | (e1, e2, _) when e2 e1 -> ()
-	      | (0L, _, _) -> raise JumpToNull
+	      | (e1, _, Some e2) when e1 = e2 ->
+                  loop eip new_eip true (Int64.succ num_insns_executed)
+		(* halt execution next time if we hit -trace-end-jump *)
+	      | (e1, until_fn, _) when until_fn e1 -> ()
+		(* halt execution when until_fn returns true *)
+	      | (0L, _, _) -> raise JumpToNull (* next eip is 0, stop *)
 	      | _ -> loop eip new_eip false (Int64.succ num_insns_executed)
+                (* otherwise keep going *)
   in
     Hashtbl.clear loop_detect;
     loop (0L) eip false 1L

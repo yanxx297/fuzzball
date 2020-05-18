@@ -35,3 +35,5 @@ val choose_smtlib_logic : external_solver_type -> string option
 val create_temp_dir : string -> string
 
 val pick_fresh_fname : string -> string -> int -> string
+
+val extra_opt_options : external_solver_type -> string

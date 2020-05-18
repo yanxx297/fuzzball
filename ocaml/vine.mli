@@ -25,6 +25,7 @@ type typ =  REG_1
 
 
 type var = int * string * typ
+val key : var -> int
 
 module Var :
 sig
@@ -166,9 +167,12 @@ val pp_typ : (string -> unit) -> typ -> unit
 val exp_to_string : exp -> string
 val lval_to_string : lvalue -> string
 val decl_to_string : decl -> string
+val typ_to_string : typ -> string
+val cast_to_string : cast_type -> string
 val var_to_string : var -> string
 val stmt_to_string : stmt -> string
 val stmt_to_channel : out_channel -> stmt -> unit
+val decl_to_channel : out_channel -> decl -> unit
 val pp_stmt : (string -> unit) -> stmt -> unit
 val pp_program : (string -> unit) -> program -> unit
 val format_value : Format.formatter -> value -> unit

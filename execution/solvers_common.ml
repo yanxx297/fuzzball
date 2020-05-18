@@ -1,8 +1,10 @@
 (*
-  Based on stp_external_engine.ml, which bears the following notice:
+  Based on stp_external_eng52ine.ml, which bears the following notice:
   Copyright (C) BitBlaze, 2009-2011, and copyright (C) 2010 Ensighta
   Security Inc.  All rights reserved.
 *)
+
+open Exec_assert_minder
 
 type external_solver_type =
   | STP_CVC
@@ -40,21 +42,21 @@ type maybe_ce_result =
 
 let parse_stp_ce e_s_t line =
   if line = "sat" then
-    (assert(e_s_t = STP_SMTLIB2);
+    (g_assert(e_s_t = STP_SMTLIB2) 100 "Solvers_common.parse_stp_ce";
      End_of_CE)
   else if line = "Invalid." then
-    (assert(e_s_t = STP_CVC);
+    (g_assert(e_s_t = STP_CVC) 100 "Solvers_common.parse_stp_ce";
      End_of_CE)
   else
-    (assert((String.sub line 0 8) = "ASSERT( ");
-     assert((String.sub line ((String.length line) - 3) 3) = " );");
+    (g_assert((String.sub line 0 8) = "ASSERT( ") 100 "Solvers_common.parse_stp_ce";
+     g_assert((String.sub line ((String.length line) - 3) 3) = " );") 100 "Solvers_common.parse_stp_ce";
      let trimmed = String.sub line 8 ((String.length line) - 11) in
      let eq_loc = String.index trimmed '=' in
      let lhs = String.sub trimmed 0 eq_loc and
 	 rhs = (String.sub trimmed (eq_loc + 1)
 		  ((String.length trimmed) - eq_loc - 1)) in
-       assert((String.sub lhs ((String.length lhs) - 1) 1) = " "
-	   || (String.sub lhs ((String.length lhs) - 1) 1) = "<");
+       g_assert((String.sub lhs ((String.length lhs) - 1) 1) = " "
+	       || (String.sub lhs ((String.length lhs) - 1) 1) = "<") 100 "Solvers_common.parse_stp_ce";
        let lhs_rtrim =
 	 if (String.sub lhs ((String.length lhs) - 2) 1) = " " then
 	   2 else 1
@@ -93,8 +95,8 @@ let parse_cvc4_ce line =
   else if line = "(model" then
     No_CE_here
   else
-    (assert((String.sub line 0 12) = "(define-fun ");
-     assert((String.sub line ((String.length line) - 1) 1) = ")");
+    (g_assert((String.sub line 0 12) = "(define-fun ") 100 "Solvers_common.parse_cvc4_ce";
+     g_assert((String.sub line ((String.length line) - 1) 1) = ")") 100 "Solvers_common.parse_cvc4_ce";
      let trimmed1 = String.sub line 12 ((String.length line) - 13) in
      let var_end = String.index trimmed1 ' ' in
      let varname = String.sub trimmed1 0 var_end in
@@ -104,8 +106,9 @@ let parse_cvc4_ce line =
        if String.sub trimmed2 0 6 = "(Array" then
 	 No_CE_here (* array values unhandled *)
        else
-	 (assert(((String.sub trimmed2 0 4) = "Bool") ||
-		   ((String.sub trimmed2 0 10) = "(_ BitVec "));
+	 (g_assert(((String.sub trimmed2 0 4) = "Bool") ||
+		     ((String.sub trimmed2 0 10) = "(_ BitVec "))
+	    100 "Solvers_common.parse_cvc4_ce";
 	  let trimmed3 =
 	    if (String.sub trimmed2 0 4) = "Bool" then
 	      String.sub trimmed2 5 ((String.length trimmed2) - 5)
@@ -114,9 +117,10 @@ let parse_cvc4_ce line =
 		String.sub trimmed2 (type_end + 2)
 		  ((String.length trimmed2) - (type_end + 2))
 	  in
-            assert(((String.sub trimmed3 0 4) = "true") ||
-		     ((String.sub trimmed3 0 5) = "false") ||
-		     ((String.sub trimmed3 0 5) = "(_ bv"));
+            g_assert(((String.sub trimmed3 0 4) = "true") ||
+		       ((String.sub trimmed3 0 5) = "false") ||
+		       ((String.sub trimmed3 0 5) = "(_ bv"))
+	      100 "Solvers_common.parse_cvc4_ce 2";
 	    let value = Int64.of_string
 	      (if (String.sub trimmed3 0 4) = "true" then
 		 "1"
@@ -161,11 +165,12 @@ let parse_z3_ce_line s v =
 	  if String.sub s (l - 24) 24 = "model is not available\")" then
 	    (No_CE_here, None)
 	  else
-	    (Printf.printf "Z3 error: %s\n" s;
+	    (Printf.eprintf "Z3 error: %s\n" s;
 	     failwith "Unexpected error in parse_z3_ce_lines")
     | (s, Some varname) ->
 	let l = String.length s in
-	  assert(l > 4 && String.sub s 0 4 = "    ");
+	  g_assert (l > 4 && String.sub s 0 4 = "    ")
+	    100 "Solvers_common.parse_z3_ce_line";
 	  if String.sub s (l - 1) 1 <> ")" then
 	    (* More than two lines, unhandled *)
 	    (No_CE_here, None)
@@ -199,7 +204,7 @@ let parse_z3_ce_line s v =
 		    String.sub t 0 11 = "(_ as-array" ->
 		    None
 		| _ ->
-		    Printf.printf "Value parse failure on <%s>\n" trim;
+		    Printf.eprintf "Value parse failure on <%s>\n" trim;
 		    failwith "Unhandled value case in parse_z3_ce_lines"
 	    in
 	      (match vo with
@@ -236,7 +241,7 @@ let parse_z3_ce_line s v =
 	(String.sub s 0 8 = "      #x" || String.sub s 0 8 = "      #b") ->
 	(No_CE_here, None)
     | (s, _) ->
-	  Printf.printf "Parse failure on <%s>\n" s;
+	  Printf.eprintf "Parse failure on <%s>\n" s;
 	  failwith "Unhandled loop case in parse_z3_ce_line"
 
 (* MathSAT's output is multi-line like Z3's, though it's simpler in some
@@ -290,7 +295,7 @@ let parse_mathsat_ce_line s v =
 	| (") )", None) -> (End_of_CE, None)
 	| ("(  )", None) -> (End_of_CE, None)
 	| (s, _) ->
-	    Printf.printf "Parse failure on <%s>\n" s;
+	    Printf.eprintf "Parse failure on <%s>\n" s;
 	    failwith "Unhandled loop case in parse_mathsat_ce_line"
   in
     loop s v
@@ -350,3 +355,26 @@ let pick_fresh_fname dir fname filenum =
     let dir' = make_dirs dir (List.rev rest) in
       ignore(low);
       Printf.sprintf "%s/%s-%d" dir' fname filenum
+
+let extra_opt_options = function
+  | MATHSAT ->
+      ("-preprocessor.toplevel_propagation=true " ^
+	 "-preprocessor.simplification=7 " (* all *) ^
+	 "-dpll.branching_random_frequency=0.01 " ^
+	 "-dpll.branching_random_invalidate_phase_cache=true " ^
+	 "-dpll.restart_strategy=3 " (* dynamic like Glucose *) ^
+	 "-dpll.glucose_var_activity=true " ^
+	 "-dpll.glucose_learnt_minimization=true " ^
+	 "-dpll.preprocessor.mode=1 " (* pre- *) ^
+	 "-theory.bv.eager=true " ^
+	 "-theory.bv.bit_blast_mode=2 " (* AIG + synthesis *) ^
+	 "-theory.bv.delay_propagated_eqs=true " ^
+	 "-theory.arr.mode=1 " (* Boolector-like LoD *) ^
+	 "-theory.la.enabled=false " ^
+	 "-theory.eq_propagation=false " ^
+	 "-theory.fp.mode=1 " (* eager bit-blasting *) ^
+	 "-theory.fp.bit_blast_mode=2 " (* AIG + synthesis *) ^
+	 "-theory.fp.bv_combination_enabled=true " ^
+	 "-theory.euf.enabled=false " ^
+	 "-theory.arr.enabled=false ")
+  | _ -> ""

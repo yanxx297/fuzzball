@@ -2,6 +2,7 @@
   Copyright (C) BitBlaze, 2010-2012, and copyright (C) 2010 Ensighta
   Security Inc.  All rights reserved.
 *)
+open Exec_assert_minder
 
 module V = Vine;;
 
@@ -88,7 +89,7 @@ let encode_exp_flags e printable =
 	    push_word (Int64.logand i 0xffffffffL);
   in
   let push_string s =
-    assert(String.length s < 250);
+    g_assert(String.length s < 250) 100 "Frag_marshal.encode_exp_flags";
     if printable then
 	push_printable_str (Printf.sprintf "(%s)" (Exec_utils.escaped s))
     else
@@ -120,7 +121,7 @@ let encode_exp_flags e printable =
 	  push_reg_type elt_ty;
 	  push_int64 size
       | _ ->
-	  Printf.printf "Bad type: %s\n" (V.type_to_string ty);
+	  Printf.eprintf "Bad type: %s\n" (V.type_to_string ty);
 	  failwith "Unexpected variable type in encode_exp"
   in
   let push_var ((n,s,t) as var) =
@@ -289,7 +290,7 @@ let encode_exp_flags e printable =
     | V.Unknown(s) -> push 'U'; push_string s
     | V.Let(_, _, _)
       ->
-	Printf.printf "Offending exp: %s\n" (V.exp_to_string e);
+	Printf.eprintf "Offending exp: %s\n" (V.exp_to_string e);
 	failwith "Unexpected expr type in encode_exp"
   in
     loop e;
@@ -562,5 +563,5 @@ let decode_exp s =
 	| _ -> failwith "Unhandled character in decode_exp"
   in
   let (i2, e) = parse 0 in
-    assert(i2 = String.length s);
+    g_assert(i2 = String.length s) 100 "Frag_marshal.decode_exp";
     e

@@ -2,7 +2,12 @@
   Copyright (C) BitBlaze, 2009-2010. All rights reserved.
 *)
 
+open Exec_exceptions;;
+open Exec_options;;
 open Exec_domain;;
+open Exec_assert_minder;;
+
+let mem_unique_id = ref 1
 
 module GranularMemoryFunctor =
   functor (D : DOMAIN) ->
@@ -51,7 +56,8 @@ struct
 	    (l, Byte l)
 
   let gran16_get_byte  g16 missing addr which =
-    assert(which >= 0); assert(which < 2);
+    g_assert(which >= 0) 100 "Granular_memory.gran_16_get_byte";
+    g_assert(which < 2) 100 "Granular_memory.gran_16_get_byte";
     match g16, Absent8, Absent8 with
       | Short(l),_,_ -> (D.extract_8_from_16 l (endian_i 2 which), g16)
       | Gran8s(g1, g2),_,_
@@ -64,7 +70,8 @@ struct
 	      (l, Gran8s(g1, g2'))
 		
   let gran32_get_byte  g32 missing addr which =
-    assert(which >= 0); assert(which < 4);
+    g_assert(which >= 0) 100 "Granular_memory.gran_32_get_byte";
+    g_assert(which < 4) 100 "Granular_memory.gran_32_get_byte";
     match g32, Absent16, Absent16 with
       | Word(l),_,_ -> (D.extract_8_from_32 l (endian_i 4 which), g32)
       | Gran16s(g1, g2),_,_
@@ -78,7 +85,8 @@ struct
 	      (l, Gran16s(g1, g2'))
 
   let gran64_get_byte  g64 missing addr which =
-    assert(which >= 0); assert(which < 8);
+    g_assert(which >= 0) 100 "Granular_memory.gran_64_get_byte";
+    g_assert(which < 8) 100 "Granular_memory.gran_64_get_byte";
     match g64, Absent32, Absent32 with
       | Long(l),_,_ -> (D.extract_8_from_64 l (endian_i 8 which), g64)
       | Gran32s(g1, g2),_,_
@@ -103,7 +111,7 @@ struct
 	    (l, Short l)
 
   let gran32_get_short g32 missing addr which =
-    assert(which = 0 || which = 2);
+    g_assert(which = 0 || which = 2) 100 "Granular_memory.gran32_get_short";
     match g32, Absent16, Absent16 with
       | Word(l),_,_ -> (D.extract_16_from_32 l (endian_i 4 which), g32)
       | Gran16s(g1, g2),_,_
@@ -116,7 +124,7 @@ struct
 	      (l, Gran16s(g1, g2'))
 
   let gran64_get_short g64 missing addr which =
-    assert(which = 0 || which = 2 || which = 4 || which = 6);
+    g_assert(which = 0 || which = 2 || which = 4 || which = 6) 100 "Granular_memory.gran64_get_short";
     match g64, Absent32, Absent32 with
       | Long(l),_,_ -> (D.extract_16_from_64 l (endian_i 8 which), g64)
       | Gran32s(g1, g2),_,_
@@ -141,7 +149,7 @@ struct
 	    (l, Word l)
 	      
   let gran64_get_word  g64 missing addr which =
-    assert(which = 0 || which = 4);
+    g_assert(which = 0 || which = 4) 100 "Granular_memory.gran64_get_word";
     match g64, Absent32, Absent32 with
       | Long(l),_,_ -> (D.extract_32_from_64 l (endian_i 8 which), g64)
       | Gran32s(g1, g2),_,_
@@ -185,7 +193,7 @@ struct
       | Absent16 -> (Absent8, Absent8)
 
   let gran16_put_byte g16 which b =
-    assert(which = 0 || which = 1);
+    g_assert(which = 0 || which = 1) 100 "Granular_memory.gran16_put_byte";
     let (g1, g2) = gran16_split g16 in
       if which < 1 then
 	Gran8s(Byte(b), g2)
@@ -193,7 +201,8 @@ struct
 	Gran8s(g1, Byte(b))
 
   let gran32_put_byte g32 which b =
-    assert(which >= 0); assert(which < 4);
+    g_assert(which >= 0) 100 "Granular_memory.gran32_put_byte";
+    g_assert(which < 4) 100 "Granular_memory.gran32_put_byte";
     let (g1, g2) = gran32_split g32 in
       if which < 2 then
 	Gran16s((gran16_put_byte g1 which b), g2)
@@ -201,7 +210,8 @@ struct
 	Gran16s(g1, (gran16_put_byte g2 (which - 2) b))
 	  
   let gran64_put_byte g64 which b =
-    assert(which >= 0); assert(which < 8);
+    g_assert(which >= 0) 100 "Granular_memory.gran64_put_byte";
+    g_assert(which < 8) 100 "Granular_memory.gran64_put_byte";
     let (g1, g2) = gran64_split g64 in
       if which < 4 then
 	Gran32s((gran32_put_byte g1 which b), g2)
@@ -209,7 +219,7 @@ struct
 	Gran32s(g1, (gran32_put_byte g2 (which - 4) b))
 
   let gran32_put_short g32 which s =
-    assert(which = 0 || which = 2);
+    g_assert(which = 0 || which = 2)  100 "Granular_memory.gran32_put_short";
     let (g1, g2) = gran32_split g32 in
       if which < 2 then
 	Gran16s(Short(s), g2)
@@ -217,7 +227,7 @@ struct
 	Gran16s(g1, Short(s))
 	  
   let gran64_put_short g64 which s =
-    assert(which = 0 || which = 2 || which = 4 || which = 6);
+    g_assert(which = 0 || which = 2 || which = 4 || which = 6) 100 "Granular_memory.gran64_put_short";
     let (g1, g2) = gran64_split g64 in
       if which < 4 then
 	Gran32s((gran32_put_short g1 which s), g2)
@@ -225,7 +235,7 @@ struct
 	Gran32s(g1, (gran32_put_short g2 (which - 4) s))
 
   let gran64_put_word g64 which w =
-    assert(which = 0 || which = 4);
+    g_assert(which = 0 || which = 4) 100 "Granular_memory.gran64_put_word";
     let (g1, g2) = gran64_split g64 in
       if which < 4 then
 	Gran32s(Word(w), g2)
@@ -278,11 +288,80 @@ struct
       | Gran32s(g1, g2) -> (gran32_size g1) + (gran32_size g2)
       | Absent64 -> 1
 
+  let merge8 src dst =
+	match (src, dst) with
+	| (Byte(_), Byte(_)) | (Byte(_), Absent8) -> src
+	| _ -> dst
+
+  let merge16 src dst =
+	match (src, dst) with
+	| (Gran8s(sl, sr), Gran8s(dl, dr)) -> 
+		Gran8s((merge8 sl dl), (merge8 sr dr))
+	| (Gran8s(sl, sr), t)  ->
+		let (wl, wr) = gran16_split t in
+		Gran8s((merge8 sl wl), (merge8 sr wr))
+	| (t, Gran8s(dl, dr))  ->
+		let (wl, wr) = gran16_split t in
+		Gran8s((merge8 wl dl), (merge8 wr dr))
+	| (Short(_), Short(_)) | (Short(_), Absent16) -> src
+	| _ -> dst
+
+  let merge32 src dst =
+	match (src, dst) with
+	| (Gran16s(sl, sr), Gran16s(dl, dr)) -> 
+		Gran16s((merge16 sl dl), (merge16 sr dr))
+	| (Gran16s(sl, sr), t) ->
+		let (wl, wr) = gran32_split t in
+		Gran16s((merge16 sl wl), (merge16 sr wr))
+	| (t, Gran16s(dl, dr)) ->
+		let (wl, wr) = gran32_split t in
+		Gran16s((merge16 wl dl), (merge16 wr dr))
+	| (Word(_), Word(_)) | (Word(_), Absent32) -> src
+	| _ -> dst
+
+  let merge64 src dst =
+	match (src, dst) with
+	| (Gran32s(sl, sr), Gran32s(dl, dr)) -> 
+		Gran32s((merge32 sl dl), (merge32 sr dr))
+	| (Gran32s(sl, sr), t) ->
+		let (wl, wr) = gran64_split t in
+		Gran32s((merge32 sl wl), (merge32 sr wr))
+	| (t, Gran32s(dl, dr)) ->
+		let (wl, wr) = gran64_split t in
+		Gran32s((merge32 wl dl), (merge32 wr dr))
+	| (Long(_), Long(_)) | (Long(_), Absent64) -> src
+	| _ -> dst
+		
 
   class virtual granular_memory = object(self)
     val mutable missing : (int -> int64 -> D.t) =
       (fun _ -> failwith "Must call on_missing")
 	
+    val mutable pm = None
+
+    val mutable unique_id =
+      let i = !mem_unique_id in
+	incr mem_unique_id;
+	i
+
+    method set_pointer_management (ptrmng : Pointer_management.pointer_management) =
+      pm <- Some ptrmng
+
+    method private validate_safe_read_addr_range addr len =
+      match pm with
+      | Some ptrmng ->
+        if not (ptrmng#is_safe_read addr len) then
+          raise Unsafe_Memory_Access
+      | _ -> ()
+
+    method private validate_safe_write_addr_range ?(prov = Interval_tree.Internal) addr len =
+      match pm with
+      | Some ptrmng ->
+        if not (ptrmng#is_safe_write ~prov addr len) then
+          raise Unsafe_Memory_Access
+	    
+      | _ -> ()
+
     method on_missing m = missing <- m
       
     method private virtual with_chunk : int64 ->
@@ -303,10 +382,12 @@ struct
 		Some (assemble b0 b1)
 
     method maybe_load_byte addr =
+      self#validate_safe_read_addr_range addr (Int64.of_int 1);
       self#with_chunk addr
 	(fun chunk caddr which -> gran64_get_byte chunk missing caddr which)
 
     method maybe_load_short addr =
+      self#validate_safe_read_addr_range addr (Int64.of_int 2);
       if (Int64.logand addr 1L) = 0L then
 	self#with_chunk addr
 	  (fun chunk caddr which -> gran64_get_short chunk missing caddr which)
@@ -314,6 +395,7 @@ struct
 	self#maybe_load_divided addr 8 1L self#maybe_load_byte D.reassemble16
 
     method maybe_load_word addr =
+      self#validate_safe_read_addr_range addr (Int64.of_int 4);
       if (Int64.logand addr 3L) = 0L then
 	self#with_chunk addr
 	  (fun chunk caddr which -> gran64_get_word chunk missing caddr which)
@@ -321,6 +403,7 @@ struct
 	self#maybe_load_divided addr 16 2L self#maybe_load_short D.reassemble32
 
     method maybe_load_long addr =
+      self#validate_safe_read_addr_range addr (Int64.of_int 8);
       if (Int64.logand addr 7L) = 0L then
 	self#with_chunk addr
 	  (fun chunk caddr _ -> gran64_get_long chunk missing caddr)
@@ -344,11 +427,17 @@ struct
 	      s
 
     method load_word addr =
+      if !opt_trace_memory then
+	Printf.eprintf "mem%d GM load word 0x%08Lx\n" unique_id addr;
       match self#maybe_load_word addr with
-	| Some w -> w
+	| Some w ->
+	    if !opt_trace_memory then
+	      Printf.eprintf "mem%d GM load word present 0x%08Lx = %s\n"
+		unique_id addr (D.to_string_32 w);
+	    w
 	| None ->
 	    let w = missing 32 addr in
-	      self#store_word addr w;
+	      self#store_word ~prov:Interval_tree.Internal addr w;
 	      w
 
     method load_long addr =
@@ -356,45 +445,52 @@ struct
 	| Some l -> l
 	| None ->
 	    let l = missing 64 addr in
-	      self#store_long addr l;
+	      self#store_long ~prov:Interval_tree.Internal addr l;
 	      l
 
     method private virtual store_common_fast : int64 ->
       (gran64 -> int -> gran64) -> unit
 
-    method store_byte addr b =
+    method store_byte ?(prov = Interval_tree.Internal) addr b =
+      self#validate_safe_write_addr_range ~prov addr (Int64.of_int 1);
       self#store_common_fast addr
 	(fun chunk which -> gran64_put_byte chunk which b)
 	
-    method store_short addr s =
+    method store_short ?(prov = Interval_tree.Internal) addr s =
+      self#validate_safe_write_addr_range ~prov addr (Int64.of_int 2);
       if (Int64.logand addr 1L) = 0L then
 	self#store_common_fast addr
 	  (fun chunk which -> gran64_put_short chunk which s)
       else
 	(* unaligned slow path *)
 	let (b0, b1) = split16 s in
-	  self#store_byte addr b0;
-	  self#store_byte (Int64.add addr 1L) b1
+	  self#store_byte ~prov addr b0;
+	  self#store_byte ~prov (Int64.add addr 1L) b1
 
-    method store_word addr w =
+    method store_word ?(prov = Interval_tree.Internal) addr w =
+      self#validate_safe_write_addr_range ~prov addr (Int64.of_int 4);
+      if !opt_trace_memory then
+	Printf.eprintf "mem%d GM store word 0x%08Lx = %s\n"
+	  unique_id addr (D.to_string_32 w);
       if (Int64.logand addr 3L) = 0L then
 	self#store_common_fast addr
 	  (fun chunk which -> gran64_put_word chunk which w)
       else
 	(* unaligned slow path *)
 	let (s0, s1) = split32 w in
-	  self#store_short addr s0;
-	  self#store_short (Int64.add addr 2L) s1
+	  self#store_short ~prov addr s0;
+	  self#store_short ~prov (Int64.add addr 2L) s1
 
-    method store_long addr l =
+    method store_long ?(prov = Interval_tree.Internal) addr l =
+      self#validate_safe_write_addr_range ~prov addr (Int64.of_int 8);
       if (Int64.logand addr 7L) = 0L then
 	self#store_common_fast addr
 	  (fun _ _ -> Long(l))
       else
 	(* unaligned slow path *)
 	let (w0, w1) = split64 l in
-	  self#store_word addr w0;
-	  self#store_word (Int64.add addr 4L) w1
+	  self#store_word ~prov addr w0;
+	  self#store_word ~prov (Int64.add addr 4L) w1
 	    
     method store_page addr p =
       (* We choose to store the page as longs here with the aim of
@@ -425,6 +521,10 @@ struct
     method virtual clear : unit -> unit
 
     method virtual measure_size : int * int * int
+
+    method virtual update_mem : int64 -> gran64 -> unit
+
+    method virtual copy_to :  granular_memory -> unit
 
   (* method make_snap () = failwith "make_snap unsupported"; ()
      method reset () = failwith "reset unsupported"; () *)
@@ -473,7 +573,7 @@ struct
       let page = self#get_page addr and
 	  idx = Int64.to_int (Int64.logand addr 0xfffL) in
       let chunk = idx asr 3 in
-	"[" ^ (gran64_to_string page.(chunk)) ^ "]"
+	"[" ^ (gran64_to_string page.(chunk)) ^ "]" 
 
     method clear () =
       Array.fill mem 0 0x100001 None
@@ -490,6 +590,33 @@ struct
       in
       let num_entries = sum_some (fun page -> 512) mem in
 	(num_entries, num_nodes, 0)
+	
+    method update_mem addr src = 
+	let idx = Int64.to_int (Int64.logand addr 0xfffL)
+	and page_n = Int64.to_int (Int64.shift_right addr 12) in
+	let chunk = idx asr 3 in
+	match mem.(page_n) with
+	| Some page -> 
+		let dst = page.(chunk) in
+		let res = merge64 src dst in
+		Array.set page chunk res 
+	| None -> 
+		let new_page = Array.init 512 (fun _ -> Absent64) in
+		mem.(page_n) <- Some new_page;
+		Array.set new_page chunk src 
+
+    method copy_to gm = 
+	let loop page_n page = 
+		for i = 0 to (Array.length page) do
+			let addr = Int64.of_int ((page_n lsl 12) + (i lsl 3)) in
+			gm#update_mem addr page.(i)
+		done
+	in
+	for j = 0 to (Array.length mem) do
+		match mem.(j) with
+		| Some array -> loop j array 
+		| _ -> ()
+	done	
   end
 
   class granular_sink_memory = object(self)
@@ -499,12 +626,14 @@ struct
     method private with_chunk addr fn = None
     method clear () = ()
     method measure_size = (1, 0, 0)
+    method update_mem addr src = ()
+    method copy_to gm = ()
   end
 
   class granular_hash_memory = object(self)
     inherit granular_memory
 
-    val mem = Hashtbl.create 101
+    val mutable mem = Hashtbl.create 101
 
     method private with_chunk addr fn =
       let which = Int64.to_int (Int64.logand addr 0x7L) in
@@ -534,9 +663,23 @@ struct
       let caddr = Int64.logand addr (Int64.lognot 0x7L) in
       let chunk = Hashtbl.find mem caddr in
 	"[" ^ (gran64_to_string chunk) ^ "]"
+    
+    method update_mem addr src = 
+	if Hashtbl.mem mem addr then (
+		let dst = Hashtbl.find mem addr	in
+		let res = merge64 src dst in
+		Hashtbl.replace mem addr res)
+	else Hashtbl.add mem addr src 
 
+    method copy_to gm = 
+	let fn addr g64 = 
+		gm#update_mem addr g64 
+	in
+	Hashtbl.iter fn mem
+	
     method clear () =
-      Hashtbl.clear mem
+      Hashtbl.clear mem;
+      mem <- Hashtbl.create 101;
 
     method measure_size =
       let num_nodes = Hashtbl.fold (fun k v sum -> sum + gran64_size v) mem 0
@@ -550,6 +693,15 @@ struct
   object(self)
     val mutable have_snap = false
 
+    val mutable unique_id =
+      let i = !mem_unique_id in
+	incr mem_unique_id;
+	i
+
+    method set_pointer_management (ptrmng : Pointer_management.pointer_management) =
+      main#set_pointer_management ptrmng;
+      diff#set_pointer_management ptrmng
+
     method on_missing main_missing =
       main#on_missing main_missing;
       diff#on_missing
@@ -561,25 +713,25 @@ struct
 	     | 64 -> main#load_long addr
 	     | _ -> failwith "Bad size in missing")
 
-    method store_byte addr b =
+    method store_byte ?(prov = Interval_tree.Internal) addr b =
       if have_snap then
-	diff#store_byte addr b
+	diff#store_byte ~prov addr b
       else
-	main#store_byte addr b
+	main#store_byte ~prov addr b
 
-    method store_short addr s =
+    method store_short ?(prov = Interval_tree.Internal) addr s =
       if have_snap then
 	diff#store_short addr s
       else
 	main#store_short addr s
 
-    method store_word addr w =
+    method store_word ?(prov = Interval_tree.Internal) addr w =
       if have_snap then
-	diff#store_word addr w
+	diff#store_word ~prov addr w
       else
-	main#store_word addr w
+	main#store_word ~prov addr w
 
-    method store_long addr l =
+    method store_long ?(prov = Interval_tree.Internal) addr l =
       if have_snap then
 	diff#store_long addr l
       else
@@ -632,6 +784,9 @@ struct
 	main#maybe_load_word addr
 
     method load_word addr =
+      if !opt_trace_memory then
+	Printf.eprintf "mem%d GSM load word 0x%08Lx %b\n"
+	  unique_id addr have_snap;
       if have_snap then
 	match diff#maybe_load_word addr with
 	  | Some w -> w
@@ -665,28 +820,49 @@ struct
       main#clear ()
 	
     method make_snap () =
+      (*Printf.eprintf "Make snap\n";
+      let (d1, d2, d3) = diff#measure_size 
+	and (m1, m2, m3) = main#measure_size in
+	Printf.eprintf "diff (%d, %d, %d)\n" d1 d2 d3;
+	Printf.eprintf "main (%d, %d, %d)\n" m1 m2 m3;*)
+      let (snap_size, _, _) = diff#measure_size in
+      if snap_size > 0 then (
+	diff#copy_to main;
+	diff#clear ();
+	);
       have_snap <- true
 	
     method reset () = 
       diff#clear (); ()
+
+    method update_mem (addr: int64) (src: gran64) = 
+	if have_snap then
+		diff#update_mem addr src
+	else
+		main#update_mem addr src
+
+    method copy_to (gm: granular_memory) = ()
+
   end
 
   class granular_second_snapshot_memory
     (mem1_2:granular_snapshot_memory) (mem3:granular_memory) =
   object(self) 
     inherit granular_snapshot_memory (mem1_2 :> granular_memory) mem3
-      
+    
     method inner_make_snap () = mem1_2#make_snap ()
+
   end
     
   class concrete_adaptor_memory (mem:Concrete_memory.concrete_memory) =
   object(self)
+
     method on_missing (m:int -> int64 -> D.t) = ()
 
-    method store_byte  addr b = mem#store_byte  addr (D.to_concrete_8 b)
-    method store_short addr s = mem#store_short addr (D.to_concrete_16 s)
-    method store_word  addr w = mem#store_word  addr (D.to_concrete_32 w)
-    method store_long  addr l = mem#store_word  addr (D.to_concrete_64 l)
+    method store_byte ?(prov = Interval_tree.Internal) addr b = mem#store_byte addr (D.to_concrete_8 b)
+    method store_short ?(prov = Interval_tree.Internal) addr s = mem#store_short addr (D.to_concrete_16 s)
+    method store_word  ?(prov = Interval_tree.Internal) addr w = mem#store_word addr (D.to_concrete_32 w)
+    method store_long ?(prov = Interval_tree.Internal) addr l = mem#store_word addr (D.to_concrete_64 l)
 
     method load_byte  addr = D.from_concrete_8 (mem#load_byte  addr)
     method load_short addr = D.from_concrete_16(mem#load_short addr)
@@ -705,6 +881,9 @@ struct
     method measure_size = (0, 0, mem#measure_size)
 
     method clear () = mem#clear ()
+
+    method update_mem (addr: int64) (src: gran64) = ()
+    method copy_to (gm: granular_memory) = ()
   end
 
   class concrete_maybe_adaptor_memory
@@ -712,12 +891,19 @@ struct
       val mutable missing : (int -> int64 -> D.t) =
 	(fun _ -> failwith "Must call on_missing")
 
+      val mutable unique_id =
+	let i = !mem_unique_id in
+	  incr mem_unique_id;
+	  i
+
+      method set_pointer_management (ptrmng : Pointer_management.pointer_management) = ()
+
       method on_missing m = missing <- m
 
-      method store_byte  addr b = mem#store_byte  addr (D.to_concrete_8 b)
-      method store_short addr s = mem#store_short addr (D.to_concrete_16 s)
-      method store_word  addr w = mem#store_word  addr (D.to_concrete_32 w)
-      method store_long  addr l = mem#store_long  addr (D.to_concrete_64 l)
+      method store_byte  ?(prov = Interval_tree.Internal) addr b = mem#store_byte  addr (D.to_concrete_8 b)
+      method store_short ?(prov = Interval_tree.Internal) addr s = mem#store_short addr (D.to_concrete_16 s)
+      method store_word  ?(prov = Interval_tree.Internal) addr w = mem#store_word  addr (D.to_concrete_32 w)
+      method store_long  ?(prov = Interval_tree.Internal) addr l = mem#store_long  addr (D.to_concrete_64 l)
       method store_page  addr p = mem#store_page  addr p
 
       method maybe_load_byte  addr =
@@ -804,5 +990,9 @@ struct
       method measure_size = (0, 0, mem#measure_size)
 
       method clear () = mem#clear ()
+      
+      method update_mem (addr: int64) (src: gran64) = ()
+
+      method copy_to (gm: granular_memory) = ()
     end
 end

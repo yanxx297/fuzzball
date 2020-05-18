@@ -7,6 +7,7 @@ module V = Vine;;
 
 open Exec_exceptions;;
 open Exec_options;;
+open Exec_assert_minder;;
 
 class linear_decision_tree = object(self)
   inherit Decision_tree.decision_tree
@@ -52,6 +53,8 @@ class linear_decision_tree = object(self)
 
   method random_byte = Random.int 256
 
+  method random_word = Random.int64 0x100000000L
+
   method record_unsat b = ()
 
   method try_extend (trans_func : bool -> V.exp)
@@ -62,7 +65,7 @@ class linear_decision_tree = object(self)
     let c = trans_func b and
 	c' = trans_func (not b) in
     let r1 = try_func b c in
-      assert(r1);
+      g_assert(r1) 100 "Linear_decision_tree.try_extend";
       ignore(try_func (not b) c');
       self#extend b;
       (b, c)
@@ -72,7 +75,7 @@ class linear_decision_tree = object(self)
     let b = random_bit_gen () in
     let c = trans_func b in
     let r1 = try_func b c in
-      assert(r1);
+      g_assert(r1) 100 "Linear_decision_tree.try_extend_memoryless";
       self#extend b;
       (b, c)
 
@@ -92,4 +95,5 @@ class linear_decision_tree = object(self)
   method measure_size = depth
 
   method print_tree chan = ()
+  method print_dot = ()
 end
