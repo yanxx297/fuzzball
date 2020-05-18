@@ -431,12 +431,15 @@ class virtual fragment_machine = object
 
   method virtual store_str : int64 -> int64 -> string -> unit
 
-  method virtual populate_symbolic_region :
-    ?prov:Interval_tree.provenance -> string -> int -> int64 -> int -> Vine.exp array
-  method virtual make_symbolic_region : int64 -> int -> unit
+  method virtual make_fresh_symbolic_region : int64 -> int -> unit
 
   method virtual store_symbolic_cstr : int64 -> int -> bool -> bool -> unit
   method virtual store_concolic_cstr : int64 -> string -> bool -> unit
+  method virtual store_concolic_name_str :
+                   int64 -> string -> string -> int -> unit
+  method virtual populate_symbolic_region :
+    ?prov:Interval_tree.provenance -> string -> int -> int64 -> int -> Vine.exp array
+
   method virtual populate_concolic_string :
       ?prov:Interval_tree.provenance -> string -> int -> int64 -> string -> unit
 
@@ -912,7 +915,13 @@ struct
 		       is essentially "push %eip", and usually used for PIC
 		       setup instead of a real call. *)
 		  "call"
-		else if (String.sub s 0 3) = "ret" then
+		else if ((String.sub s 0 3) = "ret")
+                  || ((String.length s >= 8) &&  ((String.sub s 0 8) = "repz ret"))
+                then
+		  "return"
+		else if (String.sub s 0 8) = "repz ret" then
+		  (* "repz ret" is a weird historical synonym for "ret"
+		     that was once faster on some processors in some cases *)
 		  "return"
 		else if (String.sub s 0 8) = "repz ret" then
 		  (* "repz ret" is a weird historical synonym for "ret"
@@ -1661,6 +1670,7 @@ struct
       self#print_reg64 "%r13" R_R13;
       self#print_reg64 "%r14" R_R14;
       self#print_reg64 "%r15" R_R15;
+      (* self#print_reg64 "FS_BASE" R_FS_BASE; *)
       (* Here's how you would print the low 128 bits of the low 8 XMM
          registers, analogous to what we currently do on 32-bit. In
          many cases on x64 though you'd really want to print 16
@@ -2805,7 +2815,7 @@ struct
       done;
       ar
 
-    method make_symbolic_region base len =
+    method make_fresh_symbolic_region base len =
       let varname = "input" ^ (string_of_int symbolic_string_id) in
 	symbolic_string_id <- symbolic_string_id + 1;
 	ignore(self#populate_symbolic_region varname 0 base len)
@@ -2845,6 +2855,14 @@ struct
 	done;
 	if terminate then
 	  self#store_byte_idx base len 0
+
+    method store_concolic_name_str base str varname pos =
+      let len = String.length str in
+      for i = 0 to len - 1 do
+	self#store_byte (Int64.add base (Int64.of_int i))
+	  (form_man#make_concolic_8 (varname ^ "_" ^ (string_of_int (pos + i)))
+	     (Char.code str.[i]))
+      done
 
     method store_symbolic_wcstr base len =
       let varname = "winput" ^ (string_of_int symbolic_string_id) ^ "_" in

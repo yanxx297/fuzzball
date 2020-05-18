@@ -27,6 +27,7 @@ exception Signal of string
 exception Simplify_failure of string
 exception SimulatedAbort
 exception SimulatedExit of int64
+exception SimulatedSegfault of int64 * bool
 exception SolverFailure
 exception StartSymbolic of int64 * (unit -> unit)
 exception SymbolicJump
@@ -41,4 +42,3 @@ exception Alloc_Dealloc_Length_Mismatch
 exception Unsafe_Memory_Access
 exception Uninitialized_Memory
 exception WeirdSymbolicAddress
-
