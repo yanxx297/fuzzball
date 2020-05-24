@@ -342,9 +342,6 @@ class binary_decision_tree = object(self)
   val mutable best_heur = -1
   val mutable cur_heur = -1
 
-  method viz_tree = 
-    self#viz_bt
-
   method private viz_bt = 
     let fd = open_out "/tmp/bdt_graph" in
     let rec viz_node n =  
@@ -555,7 +552,7 @@ class binary_decision_tree = object(self)
       | Some n ->
 	  Printf.eprintf "Current query node is %d with %d children\n"
 	    cur_query.ident n;
-			self#viz_tree;
+          self#print_dot;
 	  failwith "Too many children in start_new_query_binary"
 
   method count_query =
@@ -579,7 +576,7 @@ class binary_decision_tree = object(self)
 	(if cur.query_children = None then
 	   cur.query_children <- Some 0;
 	 (match cur_query.query_children with
-	    | None -> (self#viz_tree; failwith "Count_query outside a query")
+	    | None -> (self#print_dot; failwith "Count_query outside a query")
 	    | Some k when not cur.query_counted ->
 		if !opt_trace_decision_tree then	
 		  Printf.eprintf " -> %d" (k+1);
@@ -732,9 +729,7 @@ class binary_decision_tree = object(self)
 	 if Hashtbl.mem seen eip_loc then
 	   Printf.eprintf "However, I have previously seen a node with that eip.\n"
 	 else
-	   (Printf.eprintf "And I've never seen a node with that eip.\n";
-           self#viz_tree)
-        );
+	   (Printf.eprintf "And I've never seen a node with that eip.\n"); self#print_dot);
       g_assert (cur.eip_loc = 0L || cur.eip_loc = eip_loc) 100
 	"Binary_decision_tree.try_extend 2";
       put_eip_loc cur eip_loc;
@@ -819,7 +814,7 @@ class binary_decision_tree = object(self)
 	       (Printf.eprintf "all_seen invariant failure: parent %d is all seen, but not true child %d%!\n"
 		  n.ident kid.ident;
 		self#print_tree stdout;
-		self#viz_tree;
+		self#print_dot;
 		g_assert(kid.all_seen) 100 "Binary_decision_tree.mark_all_seen_node");
 	 | _ -> ());
       (match get_t_child n with
@@ -828,6 +823,7 @@ class binary_decision_tree = object(self)
 	       (Printf.eprintf "all_seen invariant failure: parent %d is all seen, but not true child %d%!\n"
 		  n.ident kid.ident;
 		self#print_tree stdout;
+		self#print_dot;
 	       g_assert(kid.all_seen) 100 "Binary_decision_tree.mark_all_seen_node")
 	 | _ -> ());
       n.all_seen <- true;
@@ -970,15 +966,15 @@ class binary_decision_tree = object(self)
 	  tMax := t_max;
 	    if !opt_trace_guidance then
 	      Printf.eprintf
-		"Heuristic choice between F[%d, %d] and T[%d, %d]\n"
-		f_min f_max t_min t_max;
+		"Heuristic choice between F[%d, %d] and T[%d, %d] (cur %d)\n"
+		f_min f_max t_min t_max cur_heur;
 	    if f_min > f_max || t_min > t_max then
 	      (* Only one side explored, no basis to choose *)
 	      None
-	    else if !opt_target_guidance = 2.0 then
-	      if cur_heur <= 1 then
-		(* Don't apply guidance before we have any estimate
-		   of the value of this path *)
+	    else if !opt_target_guidance >= 2.0 then
+	      if !opt_target_guidance = 2.0 && cur_heur <= 1 then
+		(* At 2.0, don't apply guidance before we have any
+		   estimate of the value of this path *)
 		None
 	      (* Only prefer branches that lead to the best state(s)
 		 we've ever seen *)
@@ -1118,6 +1114,31 @@ class binary_decision_tree = object(self)
 
   method measure_size =
     !next_dt_ident    
+
+  method print_dot = 
+    let rec viz_node fd n =  
+      let id = n.ident in
+      let eip = Int64.shift_right_logical n.eip_loc 16 in
+      let ident = Int64.logand 0x000000000000ffffL n.eip_loc in 
+      let style = 
+        (if (Int64.logand ident 0xc000L) = 0xc000L then "style=filled fillcolor=yellow"
+         else "")
+      in
+        Printf.fprintf fd "%d [label=\"%d:0x%Lx (0x%Lx)\" %s];\n" id id eip ident style;
+        (match get_f_child n with 
+           | Some(Some f) -> (Printf.fprintf fd "%d -> %d [label = \"false\"];\n" id f.ident ;viz_node fd f)
+           | _ -> ());
+        (match get_t_child n with 
+           | Some(Some t) -> (Printf.fprintf fd "%d -> %d [label = \"true\"];\n" id t.ident ;viz_node fd t)
+           | _ -> ());
+    in
+      if not (!opt_save_decision_tree_dot = "") then
+        (let fd = open_out !opt_save_decision_tree_dot in
+           Printf.fprintf fd "digraph G {\n";
+           let root = get_dt_node root_ident in
+             viz_node fd root;
+             Printf.fprintf fd "}\n";
+             close_out fd)      
 
   method print_tree chan =
     let rec loop n =

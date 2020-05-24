@@ -436,6 +436,9 @@ let explore_cmdline_opts =
      "SIZE Introduce temporaries for exprs of size or larger");
     ("-trace-simplify", Arg.Set(opt_trace_simplify),
      " Print expression simplifications");
+    ("-save-decision-tree-dot", 
+     Arg.Set_string(opt_save_decision_tree_dot), 
+     "filename Save dot format decision tree to file");
   ]
 
 
@@ -903,7 +906,7 @@ let make_symbolic_init (fm:Fragment_machine.fragment_machine)
        opt_extra_conditions := [];
        List.iter (fun (base, len) ->
 		    new_max len;
-		    fm#make_symbolic_region base (Int64.to_int len))
+		    fm#make_fresh_symbolic_region base (Int64.to_int len))
 	 !opt_symbolic_regions;
        List.iter (fun (base, len) ->
 		    new_max len;

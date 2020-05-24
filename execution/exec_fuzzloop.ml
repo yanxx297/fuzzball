@@ -194,6 +194,11 @@ let fuzz_runloop fm fuzz_start_eip asmir_gamma end_eips =
     );
     log_fuzz_restart Log.always ":null_deref" true fm;
     stop "at null deref" true
+  | SimulatedSegfault(addr, is_store) -> 
+      stop
+        ("at illegal " ^
+         (if is_store then "store to" else "load from")
+         ^ " address 0x" ^ (Printf.sprintf "%08Lx" addr)) true
   | JumpToNull -> 
     log_fuzz_restart Log.always ":jump_to_null" true fm;
     stop "at jump to null" true

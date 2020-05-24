@@ -426,9 +426,9 @@ struct
 			V.UnOp(V.NOT, V.Cast(V.CAST_SIGNED, _, _))))
       | V.Ite(_, x, y)
 	->
-	  (* ITE expression "_ ? x : y" *)
-	  (match ((classify_term form_man if_weird x),
-		  (classify_term form_man if_weird y)) with
+	 (* ITE expression "_ ? x : y" *)
+	 (match (classify_term form_man if_weird x),
+	   (classify_term form_man if_weird y) with
 	     | (ExprOffset(_)|ConstantOffset(_)),
 	       (ExprOffset(_)|ConstantOffset(_)) ->
 		 ExprOffset(e)
@@ -441,9 +441,9 @@ struct
 		V.BinOp(V.BITAND, V.UnOp(V.NOT, c2), y))
 	  when c1 = c2
 	->
-	  (* ITE expression "_ ? x : y" *)
-	  (match ((classify_term form_man if_weird x),
-		  (classify_term form_man if_weird y)) with
+	 (* ITE expression "_ ? x : y" *)
+	 (match (classify_term form_man if_weird x),
+	   (classify_term form_man if_weird y) with
 	     | (ExprOffset(_)|ConstantOffset(_)),
 	       (ExprOffset(_)|ConstantOffset(_)) ->
 		 ExprOffset(e)
@@ -473,8 +473,8 @@ struct
 	 be handled by split_terms) *)
       | V.BinOp(V.PLUS, e1, e2)
 	->
-	  (match ((classify_term form_man if_weird e1),
-		  (classify_term form_man if_weird e2)) with
+	 (match (classify_term form_man if_weird e1),
+	   (classify_term form_man if_weird e2) with
 	     | (ExprOffset(_)|ConstantOffset(_)),
 	       (ExprOffset(_)|ConstantOffset(_)) -> ExprOffset(e)
 	     | _,_ -> AmbiguousExpr(e))
@@ -485,7 +485,7 @@ struct
 (* 	  -> ExprOffset(e) *)
       | V.Cast(V.CAST_SIGNED, _, _) -> ExprOffset(e)
       | V.Lval(_) -> Symbol(e)
-      | e -> (if_weird e)
+      | e -> if_weird e
 	  
   (* When we're not going to try for symbolic regions, just separate
      the concrete terms from everything else; they should be the base *)
@@ -520,8 +520,8 @@ struct
       | (_, _) ->
 	  if !opt_trace_sym_addr_details then
 	    Printf.eprintf "Analyzing addr expr %s\n" (V.exp_to_string e);
-	  let l = List.map (classify_term form_man if_weird)
-	    (split_terms e form_man) in
+	let l = List.map (classify_term form_man if_weird)
+	  (split_terms e form_man) in
 	  let (cbases, coffs, eoffs, ambig, syms) =
 	    (ref [], ref [], ref [], ref [], ref []) in
 	    List.iter
@@ -691,6 +691,11 @@ struct
     method private concretize_inner ty e ident =
       match e with 
 	| V.Cast((V.CAST_UNSIGNED|V.CAST_SIGNED) as ckind, cty, e2) ->
+	    (* If the value we're trying to concretize is an extension
+	       of a narrow symbolic expression, just concretize the
+	       narrow value and concretely extend the result. This is a
+	       valuable optimization, but the way we do the check is
+	       brittle to t-variable creation. *)
 	    if cty <> ty then
 	      Printf.eprintf "Cast type is not %s in concretize_inner of %s\n"
 		(V.type_to_string ty) (V.exp_to_string e);
@@ -899,38 +904,38 @@ struct
       dt#start_new_query;
       self#note_first_branch;
       let (cbases, coffs, eoffs, ambig, syms) =
-	classify_terms e form_man self#handle_weird_addr_expr
-      in
+	classify_terms e form_man self#handle_weird_addr_expr in
       let eoffs = List.map simplify_fp eoffs in
 	if !opt_trace_sym_addr_details then
 	  (Printf.eprintf "Concrete base terms: %s\n"
-	     (String.concat " "
+	     (String.concat "; "
 		(List.map (Printf.sprintf "0x%08Lx") cbases));
 	   Printf.eprintf "Concrete offset terms: %s\n"
-	     (String.concat " "
+	     (String.concat "; "
 		(List.map (Printf.sprintf "0x%08Lx") coffs));
 	   Printf.eprintf "Offset expression terms: %s\n"
-	     (String.concat " "
+	     (String.concat "; "
 		(List.map V.exp_to_string eoffs));
 	   Printf.eprintf "Ambiguous expression terms: %s\n"
-	     (String.concat " "
+	     (String.concat "; "
 		(List.map V.exp_to_string ambig));
 	   Printf.eprintf "Ambiguous symbol terms: %s\n"
-	     (String.concat " "
+	     (String.concat "; "
 		(List.map V.exp_to_string syms)));
 	let cbase = List.fold_left Int64.add 0L cbases in
-	let (base, base_e, off_syms) = match (cbase, syms, ambig) with
-	  | (0L, [], []) -> raise
+	let (base, base_e, off_syms) = 
+          match (cbase, syms, ambig, !opt_no_sym_regions) with
+	  | (0L, [], [], false) -> raise
 	    (NullDereference
 	       { eip_of_deref = self#get_eip;
 		 last_set_to_null = Int64.sub Int64.zero Int64.one;
 		 addr_derefed =  Int64.sub Int64.zero Int64.one; })
 	  (* The following two cases are applicable when applying
 	     table treatment for symbolic regions *)
-	  | (0L, [], [e]) -> (Some(self#region_for e), Some e, [])
-	  | (0L, [v], _) -> (Some(self#region_for v), Some v, ambig)
-	  | (0L, [], el) -> (Some 0, None, el)
-	  | (0L, vl, _) ->
+	  | (0L, [], [e], false) -> (Some(self#region_for e), Some e, [])
+	  | (0L, [v], _, false) -> (Some(self#region_for v), Some v, ambig)
+	  | (0L, [], el, _) -> (Some 0, None, el)
+	  | (0L, vl, _, _) ->
 	      let (bvar, rest_vars) =
 		(* We used to have logic here that checked whether one
 		   of the symbols was known to have already been used as
@@ -953,7 +958,7 @@ struct
 		  Printf.eprintf "Choosing %s as the base address\n"
 		    (V.exp_to_string bvar);
 		(Some(self#region_for bvar), Some bvar, rest_vars @ ambig)
-	  | (off, vl, _) ->
+	  | (off, vl, _, _) ->
 	      (Some 0, None, vl @ ambig)
 	in
 	let cloc = Int64.add cbase (List.fold_left Int64.add 0L coffs) in
@@ -1473,6 +1478,8 @@ struct
 	not !is_sat_r
 
     method private query_bitwidth e ty =
+      let wd_min = self#query_minval e ty in
+      let new_e = V.BinOp(V.MINUS, e, V.Constant(V.Int(ty, wd_min))) in
       let rec loop min max =
 	g_assert(min <= max)  100 "Sym_region_frag_machine.query_bitwidth";
 	if min = max then
@@ -1481,10 +1488,10 @@ struct
 	  let mid = (min + max) / 2 in
 	  let mask = if mid = 0 then 0L 
 	    else (Int64.shift_right_logical (-1L) (64-mid)) in
-	  let cond_e = V.BinOp(V.LE, e, V.Constant(V.Int(ty, mask))) in
+	  let cond_e = V.BinOp(V.LE, new_e, V.Constant(V.Int(ty, mask))) in
 	  let in_bounds = self#query_valid cond_e in
 	    if !opt_trace_tables then
-	      Printf.eprintf "(%s) <= 2**%d: %s\n" (V.exp_to_string e) mid
+	      Printf.eprintf "(%s) <= 2**%d: %s\n" (V.exp_to_string new_e) mid
 		(if in_bounds then "valid" else "invalid");
 	    if in_bounds then
 	      loop min mid
@@ -1531,7 +1538,10 @@ struct
 		    (match wd with Some w -> string_of_int (Int64.to_int w)
 		       | None -> "[too big]")
 		    (V.exp_to_string off_exp) dt#get_hist_str;
-		wd
+                if wd = Some 0L then
+                  None
+                else
+                  wd
 	    with Not_found ->
 	      let wd = compute_wd off_exp in
 		Hashtbl.replace bitwidth_cache key wd;
@@ -1604,12 +1614,40 @@ struct
 	    else
 	      loop (Int64.succ mid) max
       in
-      let wd = narrow_bitwidth form_man e in
+      let wd = min 63 (narrow_bitwidth form_man e) in
       let max_limit = Int64.shift_right_logical (-1L) (64-wd)
       in
+      assert(max_limit <> -1L);
       let limit = loop 0L max_limit in
 	if !opt_trace_tables then
 	  Printf.eprintf "Largest value based on queries is %Ld\n" limit;
+	limit
+
+    method private query_minval e ty =
+      let rec loop min max =
+	assert(min <= max);
+	if min = max then
+	  min
+	else
+	  let mid =
+	    Int64.shift_right (Int64.succ (Int64.add min max)) 1
+	  in
+	  let cond_e = V.BinOp(V.SLE, V.Constant(V.Int(ty, mid)), e) in
+	  let in_bounds = self#query_valid cond_e in
+	    if !opt_trace_tables then
+	      Printf.printf "(%s) >=$ %Ld: %s\n" (V.exp_to_string e) mid
+		(if in_bounds then "valid" else "invalid");
+	    if in_bounds then
+	      loop mid max 
+	    else
+	      loop min (Int64.pred mid)
+      in
+      let wd = min 62 (narrow_bitwidth_signed form_man e) in
+      let max_limit = Int64.shift_right_logical (-1L) (64-wd) in
+      let min_limit = Int64.pred (Int64.neg max_limit) in
+      let limit = loop min_limit max_limit in
+	if !opt_trace_tables then
+	  Printf.printf "Smallest value based on queries is %Ld\n" limit;
 	limit
 
     val maxval_cache = Hashtbl.create 101
@@ -1699,13 +1737,15 @@ struct
 	    ((self#region region_num)#load_long  addr)
 	| _ -> failwith "Unexpected type in table_load"
       in
+      assert(num_ents >= 1);
       let table = map_n
 	(fun i -> load_ent (Int64.add cloc (Int64.of_int (i * stride))))
 	(num_ents - 1)
       in
         if !opt_trace_tables then
-	  Printf.eprintf "Load with base %08Lx, size 2**%d, stride %d"
-	    cloc idx_wd stride;
+	  Printf.eprintf
+	    "Load with base %08Lx, size 2**%d, stride %d, elt size %d"
+	    cloc idx_wd stride (V.bits_of_width ty);
         Some (form_man#make_table_lookup table idx_exp idx_wd ty)
 
     method private concretize_once_and_load addr_e ty =
@@ -1789,10 +1829,16 @@ struct
 	let addr' = ref 0L in
 	let sym_region_table_v = 
 	  match location with
-	  | TableLocation(r, off_expr, _) ->
-	    (match self#decide_wd "Load" off_expr 0L with
-	    | None -> None
-	    | Some wd ->
+	  | TableLocation(r, off_expr, cloc) ->
+	    (match (r, self#decide_wd "Load" off_expr 0L) with
+	    | (_, None) -> None
+            | (Some 0, Some wd) ->
+	       if !opt_trace_tables then
+		Printf.printf
+		  "SRFM#handle_load table load with base 0x%Lx, offset = %s\n"
+		  cloc (V.exp_to_string off_expr);
+              self#table_load cloc r off_expr (Int64.to_int wd) ty
+	    | (_, Some wd) ->
 	      if !opt_trace_tables then
 		Printf.eprintf
 		  "SRFM#handle_load table load for sym region with offset expr = %s\n"
@@ -1951,6 +1997,30 @@ struct
 	      let v0 = form_man#simplify8 (D.extract_8_from_32 value 0) in
 	      let cond0 = byte_cond offset v0 in
 		Some (offset, cond0, 1)
+          | V.REG_64 when in_range addr 8 ->
+              (* should really be 7 other cases *)
+	      let v0 = form_man#simplify8 (D.extract_8_from_64 value 0) and
+		  v1 = form_man#simplify8 (D.extract_8_from_64 value 1) and
+		  v2 = form_man#simplify8 (D.extract_8_from_64 value 2) and
+		  v3 = form_man#simplify8 (D.extract_8_from_64 value 3) and
+                  v4 = form_man#simplify8 (D.extract_8_from_64 value 4) and
+		  v5 = form_man#simplify8 (D.extract_8_from_64 value 5) and
+		  v6 = form_man#simplify8 (D.extract_8_from_64 value 6) and
+		  v7 = form_man#simplify8 (D.extract_8_from_64 value 7) in
+	      let cond0 = byte_cond offset v0 and
+		  cond1 = byte_cond (offset + 1) v1 and
+		  cond2 = byte_cond (offset + 2) v2 and
+		  cond3 = byte_cond (offset + 3) v3 and
+                  cond4 = byte_cond (offset + 4) v4 and
+		  cond5 = byte_cond (offset + 5) v5 and
+		  cond6 = byte_cond (offset + 6) v6 and
+		  cond7 = byte_cond (offset + 7) v7 in
+              let cond01 = D.bitand1 cond0 cond1 and
+                  cond23 = D.bitand1 cond2 cond3 and
+                  cond45 = D.bitand1 cond4 cond5 and
+                  cond67 = D.bitand1 cond6 cond7 in
+		Some (offset, (D.bitand1 (D.bitand1 cond01 cond23)
+				 (D.bitand1 cond45 cond67)), 8)
 	  | _ -> None
 
     method private target_solve cond_v ident =

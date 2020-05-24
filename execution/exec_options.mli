@@ -60,6 +60,7 @@ val opt_solver_timeout : int option ref
 val opt_timeout_as_unsat : bool ref
 val opt_solver_slow_time : float ref
 val opt_save_solver_files : bool ref
+val opt_save_decision_tree_dot : string ref
 val opt_solver_path : string ref
 val opt_follow_path : string ref
 val opt_branch_preference : (int64, int64) Hashtbl.t
@@ -89,6 +90,7 @@ val opt_stop_at_measurement : bool ref
 val opt_periodic_influence : int option ref
 val opt_influence_bound : float ref
 val opt_disqualify_addrs : int64 list ref
+val opt_disqualify_on_message : string option ref
 val opt_check_condition_at : (int64 * Vine.exp) list ref
 val opt_trace_assigns : bool ref
 val opt_trace_assigns_string : bool ref
