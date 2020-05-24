@@ -522,6 +522,48 @@ let cmdline_opts =
      "N-M As above, but only for an eip range");
     ("-trace-eip", Arg.Set(opt_trace_eip),
      " Print PC of each insn executed");
+    ("-trace-loop", Arg.Set(opt_trace_loop),
+     " Print message about dynamic loops detection");
+    ("-trace-loop-detailed", 
+     (Arg.Unit
+        (fun () ->
+           opt_trace_loop := true;
+           opt_trace_loop_detailed := true;)),
+     " Print more details about dynamic loops detection");
+    ("-print-dt", Arg.Set(opt_print_dt),
+     " Print the final decision tree to file /tmp/bdt_graph in xdot format");
+    ("-trace-ivt", Arg.Set(opt_trace_ivt),
+     " Trace the building of induction variable table (IVT)");
+    ("-trace-gt", Arg.Set(opt_trace_gt),
+     " Trace the building of guard table (GT)");
+    ("-trace-precond", Arg.Set(opt_trace_precond),
+     " Trace the pre-condition computed by loop sum");
+    ("-trace-postcond", Arg.Set(opt_trace_postcond),
+     " Trace the post-condition computed by loop sum");
+    ("-use-loopsum",
+     (Arg.Unit
+        (fun () ->
+           opt_use_loopsum := true;)),
+     " Turn on loop summarization");
+    ("-trace-loopsum",
+     (Arg.Unit
+	(fun () ->
+	  opt_trace_loopsum := true;
+	  opt_trace_ivt := true;
+	  opt_trace_gt := true;
+	  opt_trace_precond := true;
+	  opt_trace_postcond := true;)),
+     " Enable several tracing option for loop summarization");
+    ("-trace-loopsum-detailed",
+     (Arg.Unit
+        (fun () ->
+           opt_trace_loopsum_detailed := true;
+           opt_trace_loopsum := true;
+           opt_trace_ivt := true;
+           opt_trace_gt := true;
+           opt_trace_precond := true;
+           opt_trace_postcond := true;)),
+     " Print more detailes for loop summarization");
     ("-trace-eval", Arg.Set(opt_trace_eval),
      " Print details of IR evaluation");
     ("-trace-fpu", Arg.Set(opt_trace_fpu),

@@ -1,0 +1,14 @@
+/export/scratch/Project/loopsum/fuzzball-loopsum/exec_utils/fuzzball \
+-trace-decision-tree \
+-no-sym-regions \
+-trace-insns -trace-temps -trace-decisions -trace-register-updates -trace-stores -trace-loads \
+-table-limit 10 -trace-tables \
+-extra-condition 'n:reg32_t<=40:reg32_t' \
+-check-condition-at '0x08048424:mem[R_ESP:reg32_t]:reg32_t<>0x5006f637:reg32_t' \
+-finish-immediately -finish-on-nonfalse-cond \
+-trace-conditions -trace-iterations \
+-solve-final-pc -trace-assigns \
+-use-loopsum -trace-loopsum-detailed -trace-loop-detailed \
+-fuzz-start-addr 0x0804840d -symbolic-word 0x0804a01c=n \
+-solver smtlib -solver-path ../../../../lib/z3/build/z3 \
+-linux-syscalls -trace-stopping ret-addr-overwrite -- ./ret-addr-overwrite 0 2>&1

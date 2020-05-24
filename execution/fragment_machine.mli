@@ -107,6 +107,7 @@ class virtual fragment_machine : object
   method virtual printable_word_reg : register_name -> string
   method virtual printable_long_reg : register_name -> string
 
+  method virtual store_exp : int64 -> Vine.exp -> Vine.typ -> unit
   method virtual store_byte_conc  : ?prov:Interval_tree.provenance -> int64 -> int   -> unit
   method virtual store_short_conc : ?prov:Interval_tree.provenance -> int64 -> int   -> unit
   method virtual store_word_conc  : ?prov:Interval_tree.provenance -> int64 -> int64 -> unit
@@ -301,6 +302,36 @@ class virtual fragment_machine : object
   method virtual before_first_branch : bool
   method virtual get_start_eip : int64
   method virtual set_start_eip : int64 -> unit
+  method virtual get_stmt : Vine.stmt list 
+  method virtual set_text_range : int64 -> int64 -> unit
+  method virtual get_stack_base_addr: int64
+  method virtual is_guard : int64 -> int64 -> bool * int64
+  method virtual in_loop : int64 -> bool
+  method virtual get_loop_head : int64
+  method virtual add_iv : int64 -> Vine.exp -> unit
+  method virtual update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
+  method virtual print_dt : unit
+  method virtual add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
+      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
+  method virtual handle_branch : int64 -> Vine.exp -> bool -> unit
+  method virtual simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
+  method virtual check_loopsum : int64 ->
+    (Vine.exp -> bool) ->
+    (Vine.exp -> unit) ->
+    (Vine.typ -> Vine.exp -> Vine.exp) ->
+    (int64 -> Vine.typ -> Vine.exp) ->
+    (Vine.exp -> Vine.exp) ->
+    (Vine.var -> Vine.exp option) ->
+    ((bool -> Vine.exp) ->
+      (bool -> Vine.exp -> bool) ->
+      (bool -> unit) -> (unit -> bool) -> (bool -> bool) -> int -> bool) ->
+    bool ->
+    (int -> bool) ->
+    (Vine.exp -> Vine.typ -> int64 option) ->
+    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * int64  
+  method virtual mark_extra_all_seen : (int -> unit) ->
+    (int -> bool) -> (int -> int) -> (int -> int) -> unit
+  method virtual is_loop_head : int64 -> bool
 	
   method virtual schedule_proc : unit
   method virtual alloc_proc : (unit -> unit) -> unit
@@ -346,6 +377,7 @@ sig
     method printable_word_reg : register_name -> string
     method printable_long_reg : register_name -> string
 
+    method store_exp : int64 -> Vine.exp -> Vine.typ -> unit
     method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
     method store_short : ?prov:Interval_tree.provenance ->  int64 -> D.t -> unit
     method store_word  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
@@ -579,6 +611,38 @@ method populate_concolic_string : ?prov:Interval_tree.provenance -> string -> in
     method before_first_branch : bool
     method get_start_eip : int64
     method set_start_eip : int64 -> unit
+    method get_stmt : Vine.stmt list 
+    method set_text_range : int64 -> int64 -> unit
+    method get_stack_base_addr: int64
+    method is_guard: int64 -> int64 -> bool * int64
+    method in_loop : int64 -> bool
+    method get_loop_head : int64
+    method add_iv : int64 -> Vine.exp -> unit
+    method update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
+    method is_iv_cond : Vine.exp -> bool
+    method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
+      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
+    method handle_branch: int64 -> Vine.exp -> bool -> unit
+    method check_loopsum : int64 -> 
+    (Vine.exp -> bool) ->
+    (Vine.exp -> unit) ->
+    (Vine.typ -> Vine.exp -> Vine.exp) ->
+    (int64 -> Vine.typ -> Vine.exp) ->
+    (Vine.exp -> Vine.exp) ->
+    (Vine.var -> Vine.exp option) ->
+    ((bool -> Vine.exp) ->
+      (bool -> Vine.exp -> bool) ->
+      (bool -> unit) -> (unit -> bool) -> (bool -> bool) -> int -> bool) ->
+    bool ->
+    (int -> bool) ->
+    (Vine.exp -> Vine.typ -> int64 option) ->
+    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * int64  
+    method mark_extra_all_seen : (int -> unit) ->
+        (int -> bool) -> (int -> int) -> (int -> int) -> unit
+    method is_loop_head : int64 -> bool
+    method simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
+
+    method print_dt : unit
 		
     method schedule_proc : unit
     method alloc_proc : (unit -> unit) -> unit

@@ -107,6 +107,7 @@ sig
     method make_regs_symbolic : unit
     method load_x86_user_regs : Temu_state.userRegs -> unit
     method print_regs : unit
+    method store_exp : int64 -> Vine.exp -> Vine.typ -> unit
     method printable_word_reg : Fragment_machine.register_name -> string
     method printable_long_reg : Fragment_machine.register_name -> string
     method store_byte  : ?prov:Interval_tree.provenance -> int64 -> D.t -> unit
@@ -279,6 +280,40 @@ sig
     method before_first_branch : bool
     method get_start_eip : int64
     method set_start_eip : int64 -> unit
+    method get_stmt : Vine.stmt list 
+    method set_text_range : int64 -> int64 -> unit
+    method get_stack_base_addr: int64
+    method is_guard : int64 -> int64 -> bool * int64
+    method in_loop : int64 -> bool
+    method get_loop_head : int64
+    method add_iv : int64 -> Vine.exp -> unit
+    method update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
+    method print_dt : unit
+    method is_iv_cond : Vine.exp -> bool
+    method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
+      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
+    method handle_branch: int64 -> Vine.exp -> bool -> unit
+    method check_loopsum : int64 ->
+    (Vine.exp -> bool) ->
+    (Vine.exp -> unit) ->
+    (Vine.typ -> Vine.exp -> Vine.exp) ->
+    (int64 -> Vine.typ -> Vine.exp) ->
+    (Vine.exp -> Vine.exp) ->
+    (Vine.var -> Vine.exp option) ->
+    ((bool -> Vine.exp) ->
+      (bool -> Vine.exp -> bool) ->
+      (bool -> unit) -> (unit -> bool) -> (bool -> bool) -> int -> bool) ->
+    bool ->
+    (int -> bool) ->
+    (Vine.exp -> Vine.typ -> int64 option) ->
+    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * int64  
+    method mark_extra_all_seen : (int -> unit) ->
+        (int -> bool) -> (int -> int) -> (int -> int) -> unit
+    method is_loop_head : int64 -> bool
+    method simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
+
+    method eval_cjmp_targ: int64 ->  int64  ->  D.t  ->  Vine.exp  ->  bool
+    method eval_cjmp_cond: Vine.exp ->  D.t * Vine.exp
 
     method schedule_proc : unit
     method alloc_proc : (unit -> unit) -> unit

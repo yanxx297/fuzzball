@@ -342,6 +342,31 @@ class binary_decision_tree = object(self)
   val mutable best_heur = -1
   val mutable cur_heur = -1
 
+  method private viz_bt = 
+    let fd = open_out "/tmp/bdt_graph" in
+    let rec viz_node n =  
+      let id = n.ident in
+      let eip = Int64.shift_right_logical n.eip_loc 16 in
+      let ident = Int64.logand 0x000000000000ffffL n.eip_loc in 
+      let style = 
+        (if (Int64.logand ident 0xc000L) = 0xc000L then "style=filled fillcolor=yellow"
+         else "")
+      in
+        Printf.fprintf fd "%d [label=\"%d:0x%Lx (0x%Lx)\" %s];\n" id id eip ident style;
+        (match get_f_child n with 
+           | Some(Some f) -> (Printf.fprintf fd "%d -> %d [label = \"false\"];\n" id f.ident ;viz_node f)
+           | _ -> ());
+        (match get_t_child n with 
+           | Some(Some t) -> (Printf.fprintf fd "%d -> %d [label = \"true\"];\n" id t.ident ;viz_node t)
+           | _ -> ());
+    in
+      Printf.fprintf fd "digraph G {\n";
+      let root = get_dt_node root_ident in
+        viz_node root;
+        Printf.fprintf fd "}\n";
+        close_out fd
+		
+	
   method init =
     let root = get_dt_node root_ident in
       root.query_children <- Some 0;
@@ -515,6 +540,7 @@ class binary_decision_tree = object(self)
        after the first decisions, and before calling start_new_query
        again. *)
     g_assert(cur.query_children <> None) 100 "Binary_decision_tree.start_new_query";
+    if cur.query_children = None then Printf.printf "warning: cur_query(%d) no childrens\n" cur.ident;
     if !opt_trace_decision_tree then
       Printf.eprintf "DT: New query, updating cur_query to cur %d\n" cur.ident;
     cur_query <- cur
@@ -550,7 +576,7 @@ class binary_decision_tree = object(self)
 	(if cur.query_children = None then
 	   cur.query_children <- Some 0;
 	 (match cur_query.query_children with
-	    | None -> failwith "Count_query outside a query"
+	    | None -> (self#print_dot; failwith "Count_query outside a query")
 	    | Some k when not cur.query_counted ->
 		if !opt_trace_decision_tree then	
 		  Printf.eprintf " -> %d" (k+1);
@@ -725,7 +751,7 @@ class binary_decision_tree = object(self)
 		      failwith "all_seen invariant failure")
 	       | (false, true) -> known false
 	       | (true, false) -> known true
-	       | (false, false) -> known (random_bit_gen ()))
+	       | (false, false) -> (known (random_bit_gen ())))
 	| (Some(Some f_kid), Some None, _) ->
 	    g_assert(not f_kid.all_seen) 100 "Binary_decision_tree.try_extend";
 	    known false
@@ -863,6 +889,12 @@ class binary_decision_tree = object(self)
 	Printf.eprintf "DT: Mark_all_seen at %d\n" node.ident;
       loop node
 
+  method mark_all_seen_ident ident =
+    if ident >= 0 then
+      Printf.eprintf "mark extra node %d to all_seen\n" ident;
+      let node = ident_to_node ident in
+        self#mark_all_seen_node node
+
   method private maybe_mark_all_seen_node n =
     if !opt_trace_decision_tree then	
       Printf.eprintf "DT: maybe_mark_all_seen_node at %d\n" n.ident;
@@ -992,6 +1024,32 @@ class binary_decision_tree = object(self)
   method mark_all_seen =
     self#mark_all_seen_node cur;
     self#propagate_heur cur
+
+  (* Return whether the given node is all_seen*)
+  (* This is an extra method added for loop summarization*)
+  method is_all_seen ident =
+    if ident < 0 then false
+    else
+      let node = ident_to_node ident in
+        node.all_seen
+
+  method get_f_child ident =
+    if ident < 0 then -1
+    else
+      let node = ident_to_node ident in
+      let child = get_f_child node in
+        match child with
+          | None | Some None -> -1
+          | Some (Some n) -> ref_dt_node n
+
+  method get_t_child ident =
+    if ident < 0 then -1
+    else
+      let node = ident_to_node ident in
+      let child = get_t_child node in
+        match child with
+          | None | Some None -> -1
+          | Some (Some n) -> ref_dt_node n
 
   method try_again_p = not (get_dt_node root_ident).all_seen
 

@@ -308,6 +308,7 @@ struct
       let cond' = form_man#rewrite_for_solver cond in
       let conj = List.fold_left	(fun es e -> V.BinOp(V.BITAND, e, es)) cond' (List.rev path_cond)
       in
+			(*Printf.printf "query_with_path_cond_wcache: %s\n" (V.exp_to_string conj);*)
       let ce_opt =
 	let rec loop = function
 	  | ce_ref :: rest
@@ -364,6 +365,7 @@ struct
 		Printf.eprintf "Slow query (%f sec)\n"
 		  ((get_time ()) -. time_before);
 	        flush stdout;
+                flush stderr;
 		query_engine#after_query is_slow;
 		query_engine#pop;
 		List.iter (fun v -> V.VarHash.remove var_seen_hash v) new_vars;
@@ -518,6 +520,7 @@ struct
        0xa2yy SRFM jump, offset concretize, yy is bit or 0x80 + try
        0xa400 SRFM jump, concolic solve-pc
        0xb2yy SPFM addr_exp, bit yy
+       0xc0xx Loop summarization related
     *)
     method private eip_ident ident =
       let eip = self#get_eip in
@@ -588,7 +591,10 @@ struct
 	  (Printf.eprintf "Pretending %B was sat after double timeout in concolic mode\n" b;
 	   b)
 	else
+		(
+		Printf.printf "%s\n" (V.exp_to_string cond);
 	  failwith "Double unsat in query_with_pc_choice"
+		)
       in
 	if !opt_trace_binary_paths then
 	  Printf.eprintf "Current Path String: %s\n" dt#get_hist_str;
@@ -620,8 +626,16 @@ struct
 	self#extend_pc_known cond verbose ident
 	  ((form_man#eval_expr cond) <> 0L))
       else
-	let (result, cond') = (self#query_with_pc_choice cond verbose ident
-				 (fun () -> self#follow_or_random)) in
+        let choice = (
+          if fm#is_iv_cond cond 
+          then 
+            (Printf.printf "extend_pc_rand: cond is iv cond; prefer 1\n";
+             (fun () -> true))
+          else
+            (fun () -> self#follow_or_random)
+        )
+        in
+	let (result, cond') = (self#query_with_pc_choice cond verbose ident choice ) in
 	self#add_to_path_cond cond';
 	result
 
@@ -634,6 +648,7 @@ struct
     (* Like _known, but check the concolic path before the supplied
        preference *)
     method extend_pc_pref cond verbose ident pref =
+      if true then failwith "extend_pc_pref";
       if !opt_concrete_path_simulate ||
 	(match !opt_concolic_prob with
 	| Some p -> (dt#random_float < p)
@@ -722,49 +737,51 @@ struct
       let eip = self#get_eip in
       let path = ref "" in
       let preference = (
-	try let pref = Hashtbl.find opt_branch_preference eip in
-	    path := "hashtable hit";
-	    match pref with
-	    | 0L -> Some false
-	    | 1L -> Some true
-	    | _ -> failwith "Unsupported branch preference"
-	with
-	| Not_found ->
-	  path := "hashtable miss (heur_preference)";
-	  match dt#heur_preference with
-	  | Some b ->
-	    let choice = dt#random_float in
-	    if choice < !opt_target_guidance then
-	      (if !opt_trace_guidance then
-		  Printf.eprintf "On %f, using heuristic choice %b\n"
-		    choice b;
-	       Some b)
-	    else
-	      (if !opt_trace_guidance then
-		  Printf.eprintf "On %f, falling to cjmp_heuristic\n"
-		    choice;
-	       self#call_cjmp_heuristic eip targ1 targ2 None)
-	  | None -> 
-	      (match is_input_byte_compare e with
-		 | Some (flip, c) ->
-		     (try let prob = Hashtbl.find opt_rare_delims c in
-		      let choice = dt#random_float in
-			if choice > prob then
-			  Some flip
-			else
-			  Some (not flip)
-		      with
-			| Not_found ->
-			    if !opt_auto_rare_delims then
-			      (Hashtbl.replace opt_varying_rare_delims c ();
-			       if not
-				 (Hashtbl.mem opt_varying_rare_delims c)
-			       then
-				 Printf.eprintf
-				   "Enabling -rare-delim for 0x%02x\n" c);
-			    (self#call_cjmp_heuristic eip targ1 targ2 None))
-		 | None ->
-		     (self#call_cjmp_heuristic eip targ1 targ2 None))) in
+        try let pref = Hashtbl.find opt_branch_preference eip in
+          path := "hashtable hit";
+          match pref with
+            | 0L -> Some false
+            | 1L -> Some true
+            | _ -> failwith "Unsupported branch preference"
+        with
+          | Not_found -> (
+              path := "hashtable miss (heur_preference)";
+              match dt#heur_preference with
+                | Some b ->
+                    let choice = dt#random_float in
+                      if choice < !opt_target_guidance then
+                        (if !opt_trace_guidance then
+                           Printf.eprintf "On %f, using heuristic choice %b\n"
+                             choice b;
+                         Some b)
+                      else
+                        (if !opt_trace_guidance then
+                           Printf.eprintf "On %f, falling to cjmp_heuristic\n"
+                             choice;
+                         self#call_cjmp_heuristic eip targ1 targ2 None)
+                | None -> 
+                    (match is_input_byte_compare e with
+                       | Some (flip, c) ->
+                           (try let prob = Hashtbl.find opt_rare_delims c in
+                            let choice = dt#random_float in
+                              if choice > prob then
+                                Some flip
+                              else
+                                Some (not flip)
+                            with
+                              | Not_found ->
+                                  if !opt_auto_rare_delims then
+                                    (Hashtbl.replace opt_varying_rare_delims c ();
+                                     if not
+                                          (Hashtbl.mem opt_varying_rare_delims c)
+                                     then
+                                       Printf.eprintf
+                                         "Enabling -rare-delim for 0x%02x\n" c);
+                                  (self#call_cjmp_heuristic eip targ1 targ2 None))
+                       | None ->
+                           (self#call_cjmp_heuristic eip targ1 targ2 None)))
+                           ) 
+      in
       (*
 	Log.trace (Yojson_logger.LazyJson
 	(lazy
@@ -782,9 +799,17 @@ struct
       *)
       preference
 
-    method eval_cjmp exp targ1 targ2 =
+    method eval_cjmp_cond exp = 
+      let exp' = self#eval_int_exp exp in
+      let v = form_man#simplify1 (exp') in
+      let e = D.to_symbolic_1 v in
+        if !opt_trace_loopsum_detailed then
+          Printf.printf "eval_cjmp_cond: eval %s to %s\n" (V.exp_to_string exp) (V.exp_to_string e);
+        (v, e)
+
+		
+    method eval_cjmp_targ targ1 targ2 v e =
       let eip = self#get_eip in
-      let v = form_man#simplify1 (self#eval_int_exp exp) in
       let (is_conc, result) =
 	if Hashtbl.mem opt_branch_preference_unchecked eip then
 	  match Hashtbl.find opt_branch_preference_unchecked eip with
@@ -799,9 +824,8 @@ struct
 	(ignore(self#call_cjmp_heuristic eip targ1 targ2 (Some result));
 	 result)
       else
-	let e = D.to_symbolic_1 v in
 	let ident = 0x1000 + (self#get_stmt_num land 0xfff) in
-	if !opt_trace_conditions then 
+	(if !opt_trace_conditions then 
 	  Printf.eprintf "Symbolic branch condition (0x%08Lx) %s\n"
 	    (self#get_eip) (V.exp_to_string e);
 	if !opt_concrete_path then
@@ -822,7 +846,12 @@ struct
 	   dt#count_query;
 	   ignore(self#call_cjmp_heuristic eip targ1 targ2 (Some b));
 	   b)
+        )
 
+    method eval_cjmp exp targ1 targ2 =
+      let (v, e) = self#eval_cjmp_cond exp in
+        self#eval_cjmp_targ targ1 targ2 v e
+   
     (* This code has bitrotten a bit, as shown by its lack of support
        for 64-bit addresses, since the implementation in
        srfm#choose_conc_offset_uniform is usually used instead. *)
@@ -978,6 +1007,7 @@ struct
       dt#set_heur 1;
       dt#print_dot;
       dt#mark_all_seen;
+      fm#mark_extra_all_seen dt#mark_all_seen_ident dt#is_all_seen dt#get_t_child dt#get_f_child;
       infl_man#finish_path;
       if !opt_trace_binary_paths then
 	Printf.eprintf "Path: %s\n" dt#get_hist_str;
@@ -993,6 +1023,7 @@ struct
 	g_assert(let (b,_) =
 		 self#query_with_path_cond_wcache V.exp_true true false
 	       in b) 100 "Sym_path_frag_machine.finish_path";
+      Printf.eprintf "############################################################################\n";
       dt#try_again_p
 
     method print_tree chan = dt#print_tree chan
@@ -1036,5 +1067,9 @@ struct
       if !opt_trace_working_ce_cache then
 	Printf.eprintf "CE cache stats: %Ld hits / %Ld refs\n"
 	  !ce_cache_hits !ce_cache_refs
+
+   (* TODO: remove print_dt and use opt_save_decision_tree_dot *)
+    method print_dt =
+      dt#print_dot
   end
 end
