@@ -503,18 +503,20 @@ class loop_record tail head g= object(self)
   (* EC = (D+dD+1)/dD if integer overflow not happen *)
   (* EC = (D-1)/dD + 1 if iof happens*)
   (* D is unsigned and dD should be positive *)
-  method private ec var = 
+  method private ec var simplify = 
     let (op, ty, d, dd) = var in
-      V.Ite(V.BinOp(V.LT, V.BinOp(V.PLUS, d, dd), d),
-            V.BinOp(V.PLUS, 
-                    V.BinOp(V.DIVIDE, 
-                            V.BinOp(V.MINUS, d, V.Constant(V.Int(ty, 1L))), 
-                            dd),
-                    V.Constant(V.Int(ty, 1L))),
-            V.BinOp(V.DIVIDE, 
-                    V.BinOp(V.MINUS, 
-                            V.BinOp(V.PLUS, d, dd), 
-                            V.Constant(V.Int(ty, 1L))), dd))
+      V.Ite(simplify V.REG_1 (V.BinOp(V.LT, V.BinOp(V.PLUS, d, dd), d)),
+            simplify ty 
+              (V.BinOp(V.PLUS, 
+                       V.BinOp(V.DIVIDE, 
+                               V.BinOp(V.MINUS, d, V.Constant(V.Int(ty, 1L))), 
+                               dd),
+                       V.Constant(V.Int(ty, 1L)))),
+            simplify ty
+              (V.BinOp(V.DIVIDE, 
+                       V.BinOp(V.MINUS, 
+                               V.BinOp(V.PLUS, d, dd), 
+                               V.Constant(V.Int(ty, 1L))), dd)))
 
   (* Compute expected loop count from a certain guard*)
   (* D and dD should not be 0, otherwise current path never enter/exit the loop *)
@@ -543,30 +545,30 @@ class loop_record tail head g= object(self)
                     (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
                            self#ec (op, ty, 
                                     V.Ite(d_cond, d, V.UnOp(V.NOT, d)), 
-                                    V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
+                                    V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))) simplify,
                            V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
                                  self#ec (op, ty, 
                                           V.BinOp(V.PLUS, 
                                                   V.BinOp(V.MINUS, 
                                                           V.Constant(V.Int(ty, Int64.sub (min_signed ty) 1L)), 
-                                                          lhs), dd), dd),
+                                                          lhs), dd), dd) simplify,
                                  self#ec (op, ty, 
                                           V.BinOp(V.MINUS, 
                                                   V.BinOp(V.MINUS, 
                                                           V.Constant(V.Int(ty, min_signed ty)), lhs), dd), 
-                                          V.UnOp(V.NEG, dd)))))
+                                          V.UnOp(V.NEG, dd)) simplify)))
               | V.LE | V.LT ->
                   Some
                     (V.Ite(V.BinOp(V.XOR, d_cond, dd_cond),
                            self#ec (op, ty, 
                                     V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
-                                    V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))),
+                                    V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))) simplify,
                            V.Ite(V.BinOp(V.BITAND, d_cond, dd_cond),
                                  self#ec (op, ty, V.BinOp(V.PLUS, 
                                                           V.BinOp(V.MINUS, 
                                                                   V.Constant(V.Int(ty, max_unsigned ty)), 
-                                                                  lhs), dd), dd),
-                                 self#ec (op, ty, V.BinOp(V.MINUS, lhs, dd), dd))))
+                                                                  lhs), dd), dd) simplify,
+                                 self#ec (op, ty, V.BinOp(V.MINUS, lhs, dd), dd) simplify)))
               | V.EQ ->
                   (let reachable = 
                      V.BinOp(V.EQ, 
@@ -581,7 +583,7 @@ class loop_record tail head g= object(self)
                            Some 
                              (self#ec (op, ty, 
                                        V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
-                                       V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))))
+                                       V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))) simplify)
                        | (true, false) -> None
                        | (false, _) ->
                            (match (query_unique_value dd ty) with
@@ -633,41 +635,43 @@ class loop_record tail head g= object(self)
     let res = 
       (match op with
          | V.SLE -> 
-             (let loop_cond = V.BinOp(V.SLT, rhs, lhs) in
+             (let loop_cond = simplify V.REG_1 (V.BinOp(V.SLT, rhs, lhs)) in
               let iof_cond = 
-                V.BinOp(V.BITAND, 
-                        V.BinOp(V.BITAND, 
-                                V.BinOp(V.SLT, rhs, V.Constant(V.Int(ty, 0L))), 
-                                V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), lhs)), 
-                        V.BinOp(V.SLT, V.BinOp(V.MINUS, lhs, rhs), lhs)) 
+                simplify V.REG_1 
+                  (V.BinOp(V.BITAND, 
+                           V.BinOp(V.BITAND, 
+                                   V.BinOp(V.SLT, rhs, V.Constant(V.Int(ty, 0L))), 
+                                   V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), lhs)), 
+                           V.BinOp(V.SLT, V.BinOp(V.MINUS, lhs, rhs), lhs))) 
               in 
                 msg := !msg ^ (Printf.sprintf "loop_cond %s\n" (V.exp_to_string (simplify V.REG_1 loop_cond)));
                 msg := !msg ^ (Printf.sprintf "iof_cond %s\n" (V.exp_to_string (simplify V.REG_1 iof_cond)));
-                Some (V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
-                           V.BinOp(V.MINUS, lhs, rhs),
-                           V.Constant(V.Int(ty, 0L)))))
+                Some (simplify ty (V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
+                            simplify ty (V.BinOp(V.MINUS, lhs, rhs)),
+                            simplify ty (V.Constant(V.Int(ty, 0L)))))))
          | V.SLT -> 
-             (let loop_cond = V.BinOp(V.SLE, rhs, lhs) in
+             (let loop_cond = simplify V.REG_1 (V.BinOp(V.SLE, rhs, lhs)) in
               let iof_cond = 
-                V.BinOp(V.BITAND, 
-                        V.BinOp(V.BITAND, 
-                                V.BinOp(V.SLT, rhs, V.Constant(V.Int(ty, 0L))), 
-                                V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), lhs)), 
-                        V.BinOp(V.SLT, V.BinOp(V.MINUS, lhs, rhs), lhs)) 
+                simplify V.REG_1
+                  (V.BinOp(V.BITAND, 
+                           V.BinOp(V.BITAND, 
+                                   V.BinOp(V.SLT, rhs, V.Constant(V.Int(ty, 0L))), 
+                                   V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), lhs)), 
+                           V.BinOp(V.SLT, V.BinOp(V.MINUS, lhs, rhs), lhs))) 
               in 
                 msg := !msg ^ (Printf.sprintf "loop_cond %s\n" (V.exp_to_string (simplify V.REG_1 loop_cond)));
                 msg := !msg ^ (Printf.sprintf "iof_cond %s\n" (V.exp_to_string (simplify V.REG_1 iof_cond)));
-                Some (V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
-                           V.BinOp(V.MINUS, lhs, rhs),
-                           V.Constant(V.Int(ty, 0L)))))
+                Some (simplify ty (V.Ite(V.BinOp(V.BITAND, loop_cond, V.UnOp(V.NOT, iof_cond)),
+                                        simplify ty (V.BinOp(V.MINUS, lhs, rhs)),
+                                        simplify ty (V.Constant(V.Int(ty, 0L)))))))
          | V.LE -> 
-             (let cond = V.BinOp(V.LT, rhs, lhs) in
-                Some (V.Ite(cond, V.BinOp(V.MINUS, lhs, rhs), V.Constant(V.Int(ty, 0L)))))
+             (let cond = simplify V.REG_1 (V.BinOp(V.LT, rhs, lhs)) in
+                Some (simplify ty (V.Ite(cond, simplify ty (V.BinOp(V.MINUS, lhs, rhs)), V.Constant(V.Int(ty, 0L))))))
          | V.LT -> 
-             (let cond = V.BinOp(V.LE, rhs, lhs) in
-                Some (V.Ite(cond, V.BinOp(V.MINUS, lhs, rhs), V.Constant(V.Int(ty, 0L)))))
+             (let cond = simplify V.REG_1 (V.BinOp(V.LE, rhs, lhs)) in
+                Some (simplify ty (V.Ite(cond, simplify ty (V.BinOp(V.MINUS, lhs, rhs)), V.Constant(V.Int(ty, 0L))))))
          | V.EQ -> 
-             (Some (V.BinOp(V.MINUS, lhs, rhs)))
+             (Some (simplify ty (V.BinOp(V.MINUS, lhs, rhs))))
          | _  -> None)
     in
       if !opt_trace_loopsum_detailed then Printf.eprintf "%s" !msg;
@@ -700,9 +704,11 @@ class loop_record tail head g= object(self)
                 (match (d_opt, d_opt', dd_opt) with
                    | (Some d, Some d', None) ->
                        (let dd' = V.BinOp(V.MINUS, d', d) in
+                          Printf.eprintf "query_unique_value %s\n" (V.exp_to_string dd') ;
                           match query_unique_value dd' ty with
                             | Some (v: int64) ->
-                                self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip)
+                                (Printf.eprintf "query result: 0x%Lx\n" v;
+                                 self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip))
                             | None ->())
                    | (Some d, Some d', Some dd) ->
                        (let dd' = V.BinOp(V.MINUS, d', d) in
@@ -851,9 +857,9 @@ class loop_record tail head g= object(self)
                                            unwrap_temp query_unique_value run_slice) with
                                     | Some ec -> 
                                         if !after_min then
-                                          res := V.BinOp(V.BITAND, !res, V.BinOp(V.SLE, min_ec, ec))
+                                          res := simplify V.REG_1 (V.BinOp(V.BITAND, !res, V.BinOp(V.SLE, min_ec, ec)))
                                         else
-                                          res := V.BinOp(V.BITAND, !res, V.BinOp(V.SLT, min_ec, ec))
+                                          res := simplify V.REG_1 (V.BinOp(V.BITAND, !res, V.BinOp(V.SLT, min_ec, ec)))
                                     | None -> ())
                                else after_min := true
                           ) gt
@@ -868,8 +874,8 @@ class loop_record tail head g= object(self)
                                     | Some (cond, slice) -> 
                                         (run_slice slice;
                                          if d then 
-                                           res := V.BinOp(V.BITAND, !res, eval_cond cond)
-                                         else res := V.BinOp(V.BITAND, !res, eval_cond (V.UnOp(V.NOT, cond))))
+                                           res := simplify V.REG_1 (V.BinOp(V.BITAND, !res, eval_cond cond))
+                                         else res := simplify V.REG_1 (V.BinOp(V.BITAND, !res, eval_cond (V.UnOp(V.NOT, cond)))))
                                     | None -> ()
                   ) bdt;
                   !res)
