@@ -716,13 +716,18 @@ class loop_record tail head g= object(self)
                           match query_unique_value dd' ty with
                             | Some (v: int64) ->
                                 (Printf.eprintf "query result: 0x%Lx\n" v;
-                                 self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip))
+                                 self#replace_g (eip, op, ty, d0_e, slice, Some d', 
+                                                 Some (V.Constant(V.Int(ty, v))), 
+                                                 b, eip))
                             | None ->())
                    | (Some d, Some d', Some dd) ->
                        (let dd' = V.BinOp(V.MINUS, d', d) in
-                          if check (V.BinOp(V.EQ, dd, dd')) then
-                            self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd', b, eip)
-                          else Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
+                          match query_unique_value dd' ty with
+                            | Some (v: int64) ->
+                                (if check (V.BinOp(V.EQ, dd, V.Constant(V.Int(ty, v)))) then
+                                   self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd, b, eip)
+                                 else Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
+                            | None -> Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
                    | _ -> ()))
          | None -> 
              (if iter = 2 then
