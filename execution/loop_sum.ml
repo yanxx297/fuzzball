@@ -1064,7 +1064,8 @@ class loop_record tail head g= object(self)
       in
         extend l 1
     in
-      if not (self#get_iter = 2) then ([], 0L)
+      Printf.eprintf "[check_loopsum]Start to check loopsum\n";
+      if not (self#get_iter = 2) then (Printf.eprintf "[check_loopsum] iter = %d, quit\n" self#get_iter; ([], 0L))
       else let feasibles = get_feasible lss in 
         (match loopsum_status with
            (*NOTE: should also extend useLoopsum node for Some ture/false status? *)
@@ -1089,6 +1090,7 @@ class loop_record tail head g= object(self)
 
   method reset =
     iter <- 0;
+    Printf.eprintf "[reset] reset iter to 0\n";
     loopsum_status <- None;
     ivt <- [];
     gt <- [];
@@ -1096,11 +1098,13 @@ class loop_record tail head g= object(self)
   method make_snap =
     snap_bdt <- bdt;    
     iter_snap <- iter;
+    Printf.eprintf "[make_snap] save iter %d\n" iter;
     loopsum_status_snap <- loopsum_status
 
   method reset_snap =
     bdt <- snap_bdt;
     iter <- iter_snap;
+    Printf.eprintf "[reset_snap] reset iter %d\n" iter;
     loopsum_status <- loopsum_status_snap
 
   initializer 
@@ -1295,6 +1299,7 @@ class dynamic_cfg (eip : int64) = object(self)
                  try_ext random_bit is_all_seen query_unique_value
                  cur_ident get_t_child get_f_child add_node run_slice)
         | None -> 
+            Printf.eprintf "[check_loopsum] not currently in a loop\n";
             ignore(try_ext trans_func try_func non_try_func (fun() -> false) both_fail_func 0xffff);
             ([], 0L)
 
@@ -1338,7 +1343,7 @@ class dynamic_cfg (eip : int64) = object(self)
                    (* Exit loop *)
                    | (Some l, true) ->
                        (if !opt_trace_loop && (l#get_iter > 0) then 
-                          Printf.eprintf "%sEnd loop %Lx on %d-th iter\n" 
+                          Printf.eprintf "[add_node] %sEnd loop %Lx on %d-th iter\n" 
                             msg (l#get_head) (l#get_iter);
                         if (l#get_status != Some true) 
                         && (self#get_iter > 2) then

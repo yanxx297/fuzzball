@@ -1339,6 +1339,7 @@ struct
     (* All code in this function runs before fm#run_sl(). *)
     method run () = 
       let try_ext trans_func try_func non_try_func random_bit_gen both_fail_func code= (
+        Printf.eprintf "[try_ext] try to extend for loopsum entrance node\n";
         let ident = 0xc000 + (code land 0xfff) in
           dt#start_new_query;
           let (res, _) = dt#try_extend trans_func try_func non_try_func random_bit_gen both_fail_func (self#eip_ident ident)
@@ -1403,7 +1404,7 @@ struct
         Printf.eprintf "Add %s to PC\n" (V.exp_to_string (self#simplify_exp V.REG_1 cond));
         self#add_to_path_cond cond 
       in
-        if self#is_loop_head eip && not self#before_first_branch then 
+        if self#is_loop_head eip && not self#before_first_branch then
           (let (vt, eeip) = self#check_loopsum eip check add_pc self#simplify_exp 
                               load_iv eval_cond self#unwrap_temp try_ext 
                               dt#random_bit dt#is_all_seen spfm#query_unique_value
