@@ -8,3 +8,11 @@ ret-addr-overwrite-2ls
 lvar-overwrite
 lvar-overwrite-2ls
 sign
+2-sum
+2-sum-simple
+3-sum
+je
+multi-3-sum
+*.pdf
+*.log
+*.dis
