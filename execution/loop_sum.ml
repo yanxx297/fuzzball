@@ -1126,7 +1126,7 @@ class dynamic_cfg (eip : int64) = object(self)
   val mutable loopstack_snap = Stack.create ()
 
   (* A full List of loops in current subroutine*)
-  (* Hashtbl loop head -> loop record *)
+  (* Hashtbl loop backedge -> loop record *)
   val mutable looplist = Hashtbl.create 10	
                          
   (* Check the all_seen status of loops on current path *)
@@ -1228,8 +1228,8 @@ class dynamic_cfg (eip : int64) = object(self)
   method private get_current_loop =
     if Stack.is_empty loopstack then None 
     else (		
-      let current_loop = Stack.top loopstack in
-      let loop = Hashtbl.find looplist current_loop in Some loop 
+      let e = Stack.top loopstack in
+      let loop = Hashtbl.find looplist e in Some loop 
     )
 
   (* Return bool * bool: whether enter a loop * whether enter a different loop*)	
@@ -1241,10 +1241,10 @@ class dynamic_cfg (eip : int64) = object(self)
          | None -> -1L
          | Some loop -> loop#get_head)
     in
-      if Hashtbl.mem looplist dest then 
+      if Hashtbl.mem looplist (src, dest) then 
         (if !opt_trace_loop then 
-           msg := !msg ^ (Printf.sprintf "Find loop in looplist, head = 0x%08Lx\n" dest);
-         let l = Hashtbl.find looplist dest in
+           msg := !msg ^ (Printf.sprintf "Find loop in looplist, backedge = (0x%08Lx, 0x%08Lx)\n" src dest);
+         let l = Hashtbl.find looplist (src, dest) in
            l#compute_loop_body src dest g;
            (true, true, Some l, !msg))
       else if current_head = dest then 
@@ -1272,7 +1272,13 @@ class dynamic_cfg (eip : int64) = object(self)
         | None -> false
         | Some l -> l#in_loop eip
 
-  method is_loop_head eip = Hashtbl.mem looplist eip 
+  method is_loop_head e = 
+    let res = (Hashtbl.mem looplist (current_node, e)) in
+      if res then
+        Printf.eprintf "[is_loop_head] (0x%Lx, 0x%Lx) is loop head\n" current_node e
+      else 
+        Printf.eprintf "[is_loop_head] (0x%Lx, 0x%Lx) is NOT loop head\n" current_node e;
+      res
 
   method check_loopsum eip check add_pc simplify load_iv eval_cond unwrap_temp
                               try_ext random_bit is_all_seen query_unique_value
@@ -1309,20 +1315,22 @@ class dynamic_cfg (eip : int64) = object(self)
                         if !opt_trace_loop then Printf.eprintf "%s" msg;
                         EnterLoop)
                    | None -> ErrLoop)
-            (* Enter a different loop *)
+            (* Enter a different/new loop *)
             | (true, true, loop, msg) -> 
-                (Stack.push eip loopstack;
+                (Stack.push (current_node, eip) loopstack;
                  match loop with
                    | Some lp -> 
                        (lp#inc_iter;
-                        if not (Hashtbl.mem looplist eip) then Hashtbl.add looplist eip lp;
-                        if !opt_trace_loop then 
-                          Printf.eprintf "Enter loop from %Lx -> %Lx\n%s" 
-                            current_node eip msg;
-                        if !opt_trace_loop_detailed then 
-                          Printf.eprintf "Add head = %Lx to looplist\n" eip;
-                          Printf.eprintf "At iter %d, there are %d loop(s) in list\n" 
-                            lp#get_iter (Hashtbl.length looplist);
+                        if not (Hashtbl.mem looplist (current_node, eip)) then 
+                          (Hashtbl.add looplist (current_node, eip) lp;
+                           if !opt_trace_loop then 
+                             (Printf.eprintf "[add_node] Add new loop with head edge (%Lx,  %Lx) \n" current_node eip;
+                              Printf.eprintf "[add_node] At iter %d, there are %d loop(s) in list\n" 
+                                lp#get_iter (Hashtbl.length looplist)))
+                        else 
+                          if !opt_trace_loop then 
+                            Printf.eprintf "[add_node] Enter known loop from %Lx -> %Lx\n%s" 
+                              current_node eip msg;
                         EnterLoop)
                    | None -> ErrLoop)	
             | (_, in_loop, _, msg) ->
