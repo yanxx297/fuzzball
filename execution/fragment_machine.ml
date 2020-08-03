@@ -1097,9 +1097,9 @@ struct
     method eip_hook eip =
       (* Shouldn't be needed; we instead simplify the registers when
 	 writing to them: *)
+      (* self#simplify_regs; *)
       let apply_eip_hook fn =
 	 (fn (self :> fragment_machine) eip) in
-      (* self#simplify_regs; *)
        (match deferred_start_symbolic with
        | Some setup ->
 	 deferred_start_symbolic <- None;
