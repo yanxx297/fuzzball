@@ -93,6 +93,7 @@ sig
     method concretize_misc : unit
     method get_eip : int64
     method set_eip : int64 -> unit
+    method set_loopsum_lab : int64 -> unit
     method run_eip_hooks : unit
     method get_esp : int64
     method jump_hook : string -> int64 -> int64 -> unit
@@ -293,6 +294,7 @@ sig
     method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
     method handle_branch: int64 -> Vine.exp -> bool -> unit
+    method do_check_loopsum : unit
     method check_loopsum : int64 ->
     (Vine.exp -> bool) ->
     (Vine.exp -> unit) ->

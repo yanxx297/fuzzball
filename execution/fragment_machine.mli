@@ -88,6 +88,7 @@ class virtual fragment_machine : object
   method virtual eip_hook : int64 -> unit
   method virtual get_eip : int64
   method virtual set_eip : int64 -> unit
+  method virtual set_loopsum_lab : int64 -> unit
   method virtual run_eip_hooks : unit
   method virtual get_esp : int64
   method virtual jump_hook : string -> int64 -> int64 -> unit
@@ -315,6 +316,7 @@ class virtual fragment_machine : object
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
   method virtual handle_branch : int64 -> Vine.exp -> bool -> unit
   method virtual simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
+  method virtual do_check_loopsum : unit 
   method virtual check_loopsum : int64 ->
     (Vine.exp -> bool) ->
     (Vine.exp -> unit) ->
@@ -353,6 +355,7 @@ sig
     method eip_hook : int64 -> unit
     method get_eip : int64
     method set_eip : int64 -> unit
+    method set_loopsum_lab : int64 -> unit
     method run_eip_hooks : unit
     method get_esp : int64
     method jump_hook : string -> int64 -> int64 -> unit
@@ -623,6 +626,7 @@ method populate_concolic_string : ?prov:Interval_tree.provenance -> string -> in
     method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
     method handle_branch: int64 -> Vine.exp -> bool -> unit
+    method do_check_loopsum : unit 
     method check_loopsum : int64 -> 
     (Vine.exp -> bool) ->
     (Vine.exp -> unit) ->

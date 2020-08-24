@@ -1334,10 +1334,8 @@ struct
 	      -> (v1, (conc ty2 v2))
 	  | _ -> (v1, v2)
 
-    (* A wrapper around fm#run() to loop for valid loopsum and apply it to *)
-    (* inductive variables.*)
-    (* All code in this function runs before fm#run_sl(). *)
-    method run () = 
+    method do_check_loopsum = 
+      Printf.eprintf "[do_check_loopsum]\n";
       let try_ext trans_func try_func non_try_func random_bit_gen both_fail_func code= (
         Printf.eprintf "[try_ext] try to extend for loopsum entrance node\n";
         let ident = 0xc000 + (code land 0xfff) in
@@ -1360,7 +1358,7 @@ struct
          in
          let stmt = spfm#get_stmt in
            get_eip stmt)
-         in
+      in
       let check e = 
         let typ = Vine_typecheck.infer_type_fast e in
         let (is_sat, _) = self#query_with_path_cond (self#simplify_exp typ e) true in
@@ -1411,16 +1409,14 @@ struct
                               dt#cur_ident dt#get_t_child dt#get_f_child 
            in
              (match vt with
-                | [] -> spfm#run()
+                | [] -> ()
                 | _ -> 
                     (if !opt_trace_loopsum then
                        Printf.eprintf "Apply loopsum at 0x%Lx\n" eip;
                      apply_loopsum vt;
-                     let res = spfm#run() in
-                       self#set_eip eeip;
-                       Printf.eprintf "After applying loopsum at 0x%Lx, set eip to 0x%Lx\n" eip eeip;
-                       res)))
-        else spfm#run()
+                     self#set_eip eeip;
+                     self#set_loopsum_lab eeip;
+                     Printf.eprintf "After applying loopsum at 0x%Lx, set eip to 0x%Lx\n" eip eeip)))
 
     val mutable extra_store_hooks = []
     val mutable last_set_null = Hashtbl.create 100

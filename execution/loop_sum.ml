@@ -228,6 +228,7 @@ class simple_graph (h: int64) = object(self)
         Printf.eprintf "Add %Lx to graph %Lx\n" id head
 
   method add_edge tail head =
+    Printf.eprintf "[add_node] add (%Lx, %Lx)\n" tail head;
     let add_nodup tbl a b =
       let l = Hashtbl.find_all tbl a in
         if not (List.mem b l) then Hashtbl.add tbl a b
@@ -1065,7 +1066,7 @@ class loop_record tail head g= object(self)
         extend l 1
     in
       Printf.eprintf "[check_loopsum]Start to check loopsum\n";
-      if not (self#get_iter = 2) then (Printf.eprintf "[check_loopsum] iter = %d, quit\n" self#get_iter; ([], 0L))
+      if (self#get_iter <= 2) then (Printf.eprintf "[check_loopsum] iter = %d, quit\n" self#get_iter; ([], 0L))
       else let feasibles = get_feasible lss in 
         (match loopsum_status with
            (*NOTE: should also extend useLoopsum node for Some ture/false status? *)
@@ -1118,6 +1119,8 @@ class dynamic_cfg (eip : int64) = object(self)
   val g = new simple_graph eip
   val mutable current_node = -1L
   val mutable current_node_snap = -1L
+  val mutable last_eip = -1L
+  val mutable last_eip_snap = -1L
 
   (* The eip of the 1st instruction in the procedure *)
   val head = eip
@@ -1277,20 +1280,22 @@ class dynamic_cfg (eip : int64) = object(self)
         | Some l -> l#in_loop eip
 
   method is_loop_head e = 
-    let res = (Hashtbl.mem looplist (current_node, e)) in
+    let res = (Hashtbl.mem looplist (last_eip, e)) in
       if res then
-        Printf.eprintf "[is_loop_head] (0x%Lx, 0x%Lx) is loop head\n" current_node e
+        Printf.eprintf "[is_loop_head] (0x%Lx, 0x%Lx) is loop head\n" last_eip e
       else 
-        Printf.eprintf "[is_loop_head] (0x%Lx, 0x%Lx) is NOT loop head\n" current_node e;
+        Printf.eprintf "[is_loop_head] (0x%Lx, 0x%Lx) is NOT loop head\n" last_eip e;
       res
 
   method check_loopsum eip check add_pc simplify load_iv eval_cond unwrap_temp
                               try_ext random_bit is_all_seen query_unique_value
                               cur_ident get_t_child get_f_child add_loopsum_node run_slice = 
+(*
     let trans_func (_ : bool) = V.Unknown("unused") in
     let try_func (_ : bool) (_ : V.exp) = true in
     let non_try_func (_ : bool) = () in
     let both_fail_func (b : bool) = b in
+ *)
     let loop = self#get_current_loop in
       match loop with
         | Some l -> 
@@ -1300,7 +1305,7 @@ class dynamic_cfg (eip : int64) = object(self)
                  cur_ident get_t_child get_f_child add_node run_slice)
         | None -> 
             Printf.eprintf "[check_loopsum] not currently in a loop\n";
-            ignore(try_ext trans_func try_func non_try_func (fun() -> false) both_fail_func 0xffff);
+(*             ignore(try_ext trans_func try_func non_try_func (fun() -> false) both_fail_func 0xffff); *)
             ([], 0L)
 
   (* NOTE: maybe rewrite this method with new structure, merge enter_loop and *)
@@ -1309,6 +1314,8 @@ class dynamic_cfg (eip : int64) = object(self)
     let res =
       (if current_node = -1L then
          (g#add_node eip; NotInLoop)
+       else if last_eip == -1L then
+         (g#add_edge current_node eip; NotInLoop)
        else
          (g#add_edge current_node eip;
           match (self#enter_loop current_node eip) with
@@ -1353,6 +1360,7 @@ class dynamic_cfg (eip : int64) = object(self)
                         ExitLoop)
                    | _ -> if in_loop then InLoop else NotInLoop)))
     in
+      last_eip <- current_node;
       current_node <- eip;
       res
 
@@ -1365,6 +1373,7 @@ class dynamic_cfg (eip : int64) = object(self)
       Printf.eprintf "Reset dcfg starts with %Lx\n" head;
     g#reset; 
     current_node <- -1L;
+    last_eip <- -1L;
 
   method make_snap =
     if !opt_trace_loopsum_detailed then
@@ -1372,6 +1381,7 @@ class dynamic_cfg (eip : int64) = object(self)
     g#make_snap;
     Hashtbl.iter (fun _ l -> l#make_snap) looplist;
     current_node_snap <- current_node;
+    last_eip_snap <- last_eip;
     loopstack_snap <- Stack.copy loopstack
 
   method reset_snap =
@@ -1379,6 +1389,7 @@ class dynamic_cfg (eip : int64) = object(self)
       Printf.eprintf "Reset_snap dcfg starts with %Lx\n" head;
     g#reset_snap;
     current_node <- current_node_snap;
+    last_eip <- last_eip_snap;
     loopstack <- Stack.copy loopstack_snap;
     let func hd l = 
       if (l#in_loop current_node) then 

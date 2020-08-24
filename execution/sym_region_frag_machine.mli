@@ -25,6 +25,7 @@ sig
   class sym_region_frag_machine : Decision_tree.decision_tree -> object
     method get_eip : int64
     method set_eip : int64 -> unit
+    method set_loopsum_lab : int64 -> unit
 
     method eval_addr_exp : Vine.exp -> int64
 
@@ -72,6 +73,7 @@ sig
     method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
     method handle_branch: int64 -> Vine.exp -> bool -> unit
+    method do_check_loopsum : unit
     method check_loopsum : int64 ->
     (Vine.exp -> bool) ->
     (Vine.exp -> unit) ->

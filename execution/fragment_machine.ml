@@ -328,6 +328,7 @@ class virtual fragment_machine = object
   method virtual eip_hook : int64 -> unit
   method virtual get_eip : int64
   method virtual set_eip : int64 -> unit
+  method virtual set_loopsum_lab : int64 -> unit
   method virtual run_eip_hooks : unit
   method virtual get_esp : int64
   method virtual jump_hook : string -> int64 -> int64 -> unit
@@ -557,6 +558,7 @@ class virtual fragment_machine = object
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
   method virtual handle_branch : int64 -> Vine.exp -> bool -> unit
   method virtual simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
+  method virtual do_check_loopsum : unit 
   method virtual check_loopsum : int64 ->
     (Vine.exp -> bool) ->
     (Vine.exp -> unit) ->
@@ -885,6 +887,7 @@ struct
     method private add_loopsum_node ident l = 
       loop_enter_nodes <- (ident, l)::loop_enter_nodes
 
+    method do_check_loopsum = ()
     method check_loopsum eip check add_pc simplify eval_int eval_cond unwrap_temp
                                         try_ext random_bit is_all_seen query_unique_value
                                         cur_ident get_t_child get_f_child = 
@@ -1124,7 +1127,8 @@ struct
             | Some dcfg -> 
                 if eip >= text_start && eip <= text_end 
                 then 
-                  ignore(dcfg#add_node eip));
+                  (ignore(dcfg#add_node eip); 
+                   ignore(self#do_check_loopsum)));
        List.iter apply_eip_hook extra_eip_hooks;
        let control_range_opts opts_list range_val other_val =
          List.iter (
@@ -3007,6 +3011,11 @@ struct
     val mutable stmt_num = -1
     method private get_stmt_num = stmt_num
 
+    val mutable loopsum_lab = ""
+    method set_loopsum_lab addr = 
+      loopsum_lab <- Printf.sprintf "pc_0x%Lx" addr;
+      Printf.eprintf "[set_loopsum_lab] loopsum_lab %s\n" loopsum_lab
+
     method run_sl do_jump sl =
       let jump lab =
 	saw_jump <- true;
@@ -3099,8 +3108,12 @@ struct
 			  self#run_eip_hooks;
 			  stmt_num <- 1;
 			  last_eip <- eip;
-			  saw_jump <- false);
-		     loop rest
+			  saw_jump <- false);       
+		     if loopsum_lab = "" then loop rest
+                     else 
+                       let res = loopsum_lab in
+                         loopsum_lab <- "";
+                         res
 		 | V.ExpStmt(e) ->
 		     let v = self#eval_int_exp e in
 		       ignore(v);
