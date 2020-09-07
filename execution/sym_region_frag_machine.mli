@@ -74,6 +74,7 @@ sig
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
     method handle_branch: int64 -> Vine.exp -> bool -> unit
     method do_check_loopsum : unit
+    method run_slice: Vine.stmt list -> unit
     method check_loopsum : int64 ->
     (Vine.exp -> bool) ->
     (Vine.exp -> unit) ->
@@ -87,7 +88,7 @@ sig
     bool ->
     (int -> bool) ->
     (Vine.exp -> Vine.typ -> int64 option) ->
-    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * int64  
+    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * Vine.stmt list * int64  
     method mark_extra_all_seen : (int -> unit) ->
         (int -> bool) -> (int -> int) -> (int -> int) -> unit
     method is_loop_head : int64 -> bool

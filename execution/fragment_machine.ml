@@ -558,6 +558,7 @@ class virtual fragment_machine = object
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
   method virtual handle_branch : int64 -> Vine.exp -> bool -> unit
   method virtual simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
+  method virtual run_slice: Vine.stmt list -> unit
   method virtual do_check_loopsum : unit 
   method virtual check_loopsum : int64 ->
     (Vine.exp -> bool) ->
@@ -572,7 +573,7 @@ class virtual fragment_machine = object
     bool ->
     (int -> bool) ->
     (Vine.exp -> Vine.typ -> int64 option) ->
-    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * int64  
+    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * Vine.stmt list * int64  
   method virtual mark_extra_all_seen : (int -> unit) ->
     (int -> bool) -> (int -> int) -> (int -> int) -> unit
   method virtual is_loop_head : int64 -> bool
@@ -725,12 +726,13 @@ struct
             (let (eip, op, ty, cond, lhs, rhs, b, eeip) = g in
              let d0_e = self#replace_temps_exp cond in 
                (match (dcfg#is_known_guard eip) with
-                  | Some (_, _, _, _, slice, _, _, _, _) -> 
-                      dcfg#add_g (eip, op, ty, d0_e, slice, lhs, rhs, b, eeip) check simplify query_unique_value
+                  | Some (_, _, _, _, slice, slice_g, _, _, _, _) -> 
+                      dcfg#add_g (eip, op, ty, d0_e, slice, slice_g, lhs, rhs, b, eeip) check simplify query_unique_value
                   | None ->
-                      (let (slice, _) = self#prog_slicing (self#get_vars cond) path_cache in
-                         self#print_slice slice;
-                         dcfg#add_g (eip, op, ty, d0_e, slice, lhs, rhs, b, eeip) check simplify query_unique_value)))
+                      (let (slice, _) = self#prog_slicing (self#get_vars cond) path_cache true in
+                       let (slice_g, _) = self#prog_slicing (self#get_vars cond) path_cache false in
+                         self#print_slice slice_g;
+                         dcfg#add_g (eip, op, ty, d0_e, slice, slice_g, lhs, rhs, b, eeip) check simplify query_unique_value)))
 
     val temps = V.VarHash.create 100
 
@@ -799,7 +801,7 @@ struct
         ) vars;
         Printf.eprintf "%s]\n" !vars_str        
         
-    method private prog_slicing vars prog =
+    method private prog_slicing vars prog do_replace =
       let rec check_vars lval vars =
         (match vars with
            | var::rest ->
@@ -843,12 +845,15 @@ struct
       in
         Printf.eprintf "Program slicing start.\n";
         let (l, vars) = loop_prog vars prog in
-        let l = 
-          (List.map(fun stmt ->
-                      self#replace_temps stmt
-          )l)
-        in
-          (List.rev l, vars)
+          if do_replace then 
+            (let l = 
+               (List.map(fun stmt ->
+                           self#replace_temps stmt
+               )l)
+             in
+               (List.rev l, vars))
+          else
+            (List.rev l, vars)
 
     method private print_slice slice =
       Printf.eprintf "Slicing result:\n";
@@ -861,7 +866,7 @@ struct
         | None -> ()
         | Some g ->
             (if not (g#find_slice eip) then
-               (let (slice, _) = self#prog_slicing (self#get_vars cond) path_cache
+               (let (slice, _) = self#prog_slicing (self#get_vars cond) path_cache true
                 in
                   (if (List.length slice) = 0 then () 
                    else
@@ -892,7 +897,7 @@ struct
                                         try_ext random_bit is_all_seen query_unique_value
                                         cur_ident get_t_child get_f_child = 
       match current_dcfg with
-        | None -> (Printf.eprintf "[check_loopsum] not currently in a dcfg, skip\n"; ([], 0L))
+        | None -> (Printf.eprintf "[check_loopsum] not currently in a dcfg, skip\n"; ([], [], 0L))
         | Some dcfg -> 
             dcfg#check_loopsum eip check add_pc simplify eval_int eval_cond unwrap_temp 
               try_ext random_bit is_all_seen query_unique_value
@@ -3138,12 +3143,12 @@ struct
 	stmt_num <- -1;
 	loop sl
 
-    method private run_slice sl =
+    method run_slice sl =
       Hashtbl.iter (fun _ var ->
                       V.VarHash.replace temps var (D.uninit);
-                      Printf.eprintf "run_slice: Add %s to temp list\n" (V.var_to_string var)
+(*                       Printf.eprintf "run_slice: Add %s to temp list\n" (V.var_to_string var) *)
       ) slice_var_list;
-      Printf.eprintf "run_slice: exec slice, len = %d\n" (List.length sl);
+      Printf.eprintf "[run_slice] exec slice, len = %d\n" (List.length sl);
       ignore(self#run_sl is_false sl)
 
     method run () =

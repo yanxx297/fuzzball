@@ -474,7 +474,7 @@ class loop_record tail head g= object(self)
             (Printf.eprintf "Add new iv with offset = %Lx\n" offset;
              ivt <- ivt @ [(offset, exp, exp, exp, None)])
 
-  (*Guard table: (eip, op, ty, D0_e, slice, D, dD, b, exit_eip)*)
+  (*Guard table: (eip, op, ty, D0_e, slice, slice_g, D, dD, b, exit_eip)*)
   (*D0_e: the code exp of the jump condition's location*)
   (*D: the actual distance of current iteration, updated at each new occurence of the same loop*)
   (*EC: the expected execution count*)
@@ -486,8 +486,8 @@ class loop_record tail head g= object(self)
     else
       let res = ref true in
         List.iteri (fun i g ->
-                      let (eip, _, _, _, _, _, _, _, _) = g 
-                      and (eip', _, _, _, _, _, _, _, _) = List.nth gt' i in
+                      let (eip, _, _, _, _, _, _, _, _, _) = g 
+                      and (eip', _, _, _, _, _, _, _, _, _) = List.nth gt' i in
                         if not (eip = eip') then res := false
         ) gt;
         !res
@@ -495,7 +495,7 @@ class loop_record tail head g= object(self)
   (* Given an eip, check whether it is the eip of an existing guard *)
   method is_known_guard geip gt = 
     let res = ref None in
-      List.iter (fun ((eip, _, _, _, _, _, _, _, _) as g) ->
+      List.iter (fun ((eip, _,  _, _, _, _, _, _, _, _) as g) ->
                    if eip = geip then res := Some g
       ) gt;
       !res
@@ -521,8 +521,9 @@ class loop_record tail head g= object(self)
 
   (* Compute expected loop count from a certain guard*)
   (* D and dD should not be 0, otherwise current path never enter/exit the loop *)
-  method private compute_ec (_, op, ty, d0_e, slice, _, dd_opt, b, _) 
+  method private compute_ec (_, op, ty, d0_e, slice, _,  _, dd_opt, b, _) 
           check eval_cond simplify unwrap_temp query_unique_value run_slice =
+    Printf.eprintf "[check_loopsum] run slice to compute ec\n";
     run_slice slice;
     let e = eval_cond d0_e in
     match (split_cond e b unwrap_temp) with
@@ -687,7 +688,7 @@ class loop_record tail head g= object(self)
       res
 
   method private branch_to_guard l g =
-    let (eip, _, _, _, _, _, _, _, _) = g in
+    let (eip, _, _, _, _, _, _, _, _, _) = g in
     Printf.eprintf "branch_to_guard at %Lx\n" eip;
     let lss' = 
       List.map (fun ls ->
@@ -703,12 +704,12 @@ class loop_record tail head g= object(self)
 
   (* Add or update a guard table entry*)
   method add_g g' check simplify query_unique_value =
-    let (eip, op, ty, d0_e, (slice: V.stmt list), lhs, rhs, b, eeip) = g' in
+    let (eip, op, ty, d0_e, (slice: V.stmt list), (slice_g: V.stmt list), lhs, rhs, b, eeip) = g' in
       if !opt_trace_loopsum_detailed then
         Printf.eprintf "At iter %d, check cjmp at %08Lx, op = %s\n" iter eip (V.binop_to_string op);
       (match self#is_known_guard eip gt with
          | Some g -> 
-             (let (_, _, _, _, _, d_opt, dd_opt, _, _) = g in
+             (let (_, _, _, _, _, _, d_opt, dd_opt, _, _) = g in
               let d_opt' = self#compute_distance op ty lhs rhs check simplify in
                 (match (d_opt, d_opt', dd_opt) with
                    | (Some d, Some d', None) ->
@@ -717,7 +718,7 @@ class loop_record tail head g= object(self)
                           match query_unique_value dd' ty with
                             | Some (v: int64) ->
                                 (Printf.eprintf "query result: 0x%Lx\n" v;
-                                 self#replace_g (eip, op, ty, d0_e, slice, Some d', 
+                                 self#replace_g (eip, op, ty, d0_e, slice, slice_g, Some d', 
                                                  Some (V.Constant(V.Int(ty, v))), 
                                                  b, eip))
                             | None ->())
@@ -726,14 +727,14 @@ class loop_record tail head g= object(self)
                           match query_unique_value dd' ty with
                             | Some (v: int64) ->
                                 (if check (V.BinOp(V.EQ, dd, V.Constant(V.Int(ty, v)))) then
-                                   self#replace_g (eip, op, ty, d0_e, slice, Some d', Some dd, b, eip)
+                                   self#replace_g (eip, op, ty, d0_e, slice, slice_g, Some d', Some dd, b, eip)
                                  else Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
                             | None -> Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
                    | _ -> ()))
          | None -> 
              (if iter = 2 then
                 (let d_opt = self#compute_distance op ty lhs rhs check simplify in
-                 let g = (eip, op, ty, d0_e, slice, d_opt, None, b, eeip) in
+                 let g = (eip, op, ty, d0_e, slice, slice_g, d_opt, None, b, eeip) in
                    match d_opt with
                      | Some d ->
                          (gt <- gt @ [g];
@@ -762,7 +763,7 @@ class loop_record tail head g= object(self)
 
   method private print_gt gt =
     Printf.eprintf "* Guard Table [%d]\n" (List.length gt);
-    List.iteri (fun i (eip, _, _, d0_e, _,  _, dd, _, eeip) ->
+    List.iteri (fun i (eip, _, _, d0_e, _,  _, _, dd, _, eeip) ->
                   Printf.eprintf "[%d]\t0x%Lx\t%s\t0x%Lx" i eip (V.exp_to_string d0_e) eeip;
                   match dd with
                     | Some d -> Printf.eprintf "\t(+ %s)\n" (V.exp_to_string d)
@@ -781,8 +782,8 @@ class loop_record tail head g= object(self)
     let rec loop l =
       match l with
         | g::l' -> (
-            let (e, _, _, _, _, _, _, _, _) = g in
-            let (eip, _, _, _, _, _, _, _, _) = g' in
+            let (e, _, _, _, _, _, _, _, _, _) = g in
+            let (eip, _, _, _, _, _, _, _, _, _) = g' in
               if e = eip then [g'] @ l'
               else[g] @ (loop l'))
         | [] -> []
@@ -835,7 +836,7 @@ class loop_record tail head g= object(self)
                        if dv = None then iv_all_valid := false 
         ) ivt;
         List.iter (fun g ->
-                     let (_, _, _, _, _, _, dd, _, _) = g in
+                     let (_, _, _, _, _ ,_ , _, dd, _, _) = g in
                        if dd = None then g_all_valid := false 
         ) gt;
         if not !iv_all_valid then
@@ -865,7 +866,7 @@ class loop_record tail head g= object(self)
                     | Some min_ec ->
                         List.iter 
                           (fun g ->
-                             let (eip, _, _, _, _, _, _, _, _) = g in
+                             let (eip, _, _, _, _, _, _, _, _, _) = g in
                                if not (eip = geip) then
                                  (match (self#compute_ec g check eval_cond simplify 
                                            unwrap_temp query_unique_value run_slice) with
@@ -998,7 +999,7 @@ class loop_record tail head g= object(self)
         match g_opt with
           | None -> failwith ""
           | Some g ->
-              (let (_, _, _, _, _, _, _, _, eeip) = g in
+              (let (_, _, _, _, slice, slice_g,  _, _, _, eeip) = g in
                let ec_opt = self#compute_ec g check eval_cond simplify unwrap_temp 
                               query_unique_value run_slice in 
                let vt = 
@@ -1014,8 +1015,8 @@ class loop_record tail head g= object(self)
                                   | None -> failwith ""
                            ) ivt) 
                     | None -> [])
-               in 
-                 (vt, eeip))
+               in
+                 (vt, slice_g, eeip))
     in
     let extend_with_loopsum_dry l id cur =
       Printf.eprintf "Check whether %d(parent %d) is all_seen\n" (get_t_child cur) cur;
@@ -1044,8 +1045,8 @@ class loop_record tail head g= object(self)
           n := Random.int all
         done;
         let (loopsum_cond, id, ivt, gt, _, geip) = (List.nth feasibles !n) in
-        let (vt, eeip) = compute_iv_update (ivt, gt, geip) in
-          (!n, id, vt, eeip)
+        let (vt, slice_g, eeip) = compute_iv_update (ivt, gt, geip) in
+          (!n, id, vt, slice_g, eeip)
     in
     (*TODO: modify this method so that try_ext code = lss id*)
     let extend_with_loopsum l id =      
@@ -1066,24 +1067,24 @@ class loop_record tail head g= object(self)
         extend l 1
     in
       Printf.eprintf "[check_loopsum]Start to check loopsum\n";
-      if (self#get_iter <= 2) then (Printf.eprintf "[check_loopsum] iter = %d, quit\n" self#get_iter; ([], 0L))
+      if (self#get_iter <= 2) then (Printf.eprintf "[check_loopsum] iter = %d, quit\n" self#get_iter; ([], [], 0L))
       else let feasibles = get_feasible lss in 
         (match loopsum_status with
            (*NOTE: should also extend useLoopsum node for Some ture/false status? *)
            | Some true -> 
-               Printf.eprintf "Loopsum has been applied in 0x%Lx\n" eip; ([], 0L)
+               Printf.eprintf "Loopsum has been applied in 0x%Lx\n" eip; ([], [], 0L)
            | Some false -> 
-               Printf.eprintf "Loop has been checked but no loopsum applies in 0x%Lx\n" eip; ([], 0L)
+               Printf.eprintf "Loop has been checked but no loopsum applies in 0x%Lx\n" eip; ([], [], 0L)
            | None -> 
                (if use_loopsum feasibles then
                   (loopsum_status <- Some true;
-                   let (n, id, vt, eeip) =  choose_loopsum feasibles in
+                   let (n, id, vt, slice_g, eeip) =  choose_loopsum feasibles in
                      Printf.eprintf "Choose loopsum[%d]\n" id;
                      extend_with_loopsum feasibles (n+1);
-                     (vt, eeip))
+                     (vt, slice_g, eeip))
                 else 
                   (loopsum_status <- Some false;
-                   ([], 0L))))
+                   ([], [], 0L))))
 
   (* Print loopsum status when exiting a loop*)
   method finish_loop =
@@ -1306,7 +1307,7 @@ class dynamic_cfg (eip : int64) = object(self)
         | None -> 
             Printf.eprintf "[check_loopsum] not currently in a loop\n";
 (*             ignore(try_ext trans_func try_func non_try_func (fun() -> false) both_fail_func 0xffff); *)
-            ([], 0L)
+            ([], [], 0L)
 
   (* NOTE: maybe rewrite this method with new structure, merge enter_loop and *)
   (* exit_loop, and add new loop to looplist*)

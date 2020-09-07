@@ -1403,10 +1403,11 @@ struct
         self#add_to_path_cond cond 
       in
         if self#is_loop_head eip && not self#before_first_branch then
-          (let (vt, eeip) = self#check_loopsum eip check add_pc self#simplify_exp 
-                              load_iv eval_cond self#unwrap_temp try_ext 
-                              dt#random_bit dt#is_all_seen spfm#query_unique_value
-                              dt#cur_ident dt#get_t_child dt#get_f_child 
+          (let (vt, slice_g, eeip) = 
+             self#check_loopsum eip check add_pc self#simplify_exp 
+               load_iv eval_cond self#unwrap_temp try_ext 
+               dt#random_bit dt#is_all_seen spfm#query_unique_value
+               dt#cur_ident dt#get_t_child dt#get_f_child 
            in
              (match vt with
                 | [] -> ()
@@ -1416,6 +1417,7 @@ struct
                      apply_loopsum vt;
                      self#set_eip eeip;
                      self#set_loopsum_lab eeip;
+                     self#run_slice slice_g;
                      Printf.eprintf "After applying loopsum at 0x%Lx, set eip to 0x%Lx\n" eip eeip)))
 
     val mutable extra_store_hooks = []
