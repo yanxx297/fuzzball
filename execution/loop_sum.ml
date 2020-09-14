@@ -567,7 +567,7 @@ class loop_record tail head g= object(self)
                   if check (V.BinOp(V.XOR, d_cond, dd_cond)) then
                     Some
                       (self#ec (op, ty, 
-                                V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
+                                V.Ite(d_cond, d, V.UnOp(V.NEG, d)),
                                 V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))) simplify)
                   else
                     Some
@@ -590,7 +590,7 @@ class loop_record tail head g= object(self)
                        | (true, true) ->
                            Some 
                              (self#ec (op, ty, 
-                                       V.Ite(d_cond, d, V.UnOp(V.NEG, dd)),
+                                       V.Ite(d_cond, d, V.UnOp(V.NEG, d)),
                                        V.Ite(dd_cond, dd, V.UnOp(V.NEG, dd))) simplify)
                        | (true, false) -> None
                        | (false, _) ->
