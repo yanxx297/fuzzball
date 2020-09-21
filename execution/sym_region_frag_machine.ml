@@ -1335,7 +1335,6 @@ struct
 	  | _ -> (v1, v2)
 
     method do_check_loopsum = 
-      Printf.eprintf "[do_check_loopsum]\n";
       let try_ext trans_func try_func non_try_func random_bit_gen both_fail_func code= (
         Printf.eprintf "[try_ext] try to extend for loopsum entrance node\n";
         let ident = 0xc000 + (code land 0xfff) in
