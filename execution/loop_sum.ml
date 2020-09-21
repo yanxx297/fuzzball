@@ -1068,7 +1068,7 @@ class loop_record tail head g= object(self)
     in
       Printf.eprintf "[check_loopsum]Start to check loopsum\n";
       if (self#get_iter <= 2) then (Printf.eprintf "[check_loopsum] iter = %d, quit\n" self#get_iter; ([], [], 0L))
-      else let feasibles = get_feasible lss in 
+      else
         (match loopsum_status with
            (*NOTE: should also extend useLoopsum node for Some ture/false status? *)
            | Some true -> 
@@ -1076,15 +1076,16 @@ class loop_record tail head g= object(self)
            | Some false -> 
                Printf.eprintf "Loop has been checked but no loopsum applies in 0x%Lx\n" eip; ([], [], 0L)
            | None -> 
-               (if use_loopsum feasibles then
-                  (loopsum_status <- Some true;
-                   let (n, id, vt, slice_g, eeip) =  choose_loopsum feasibles in
-                     Printf.eprintf "Choose loopsum[%d]\n" id;
-                     extend_with_loopsum feasibles (n+1);
-                     (vt, slice_g, eeip))
-                else 
-                  (loopsum_status <- Some false;
-                   ([], [], 0L))))
+               (let feasibles = get_feasible lss in
+                  if use_loopsum feasibles then
+                    (loopsum_status <- Some true;
+                     let (n, id, vt, slice_g, eeip) =  choose_loopsum feasibles in
+                       Printf.eprintf "Choose loopsum[%d]\n" id;
+                       extend_with_loopsum feasibles (n+1);
+                       (vt, slice_g, eeip))
+                  else 
+                    (loopsum_status <- Some false;
+                     ([], [], 0L))))
 
   (* Print loopsum status when exiting a loop*)
   method finish_loop =
