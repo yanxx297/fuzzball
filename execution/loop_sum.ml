@@ -724,9 +724,10 @@ class loop_record tail head g= object(self)
                           match query_unique_value dd' ty with
                             | Some (v: int64) ->
                                 (Printf.eprintf "query result: 0x%Lx\n" v;
-                                 self#replace_g (eip, op, ty, d0_e, slice, slice_g, Some d', 
-                                                 Some (V.Constant(V.Int(ty, v))), 
-                                                 b, eip))
+                                 if not (Int64.equal v 0L) then
+                                   self#replace_g (eip, op, ty, d0_e, slice, slice_g, Some d', 
+                                                   Some (V.Constant(V.Int(ty, v))), 
+                                                   b, eip))
                             | None ->())
                    | (Some d, Some d', Some dd) ->
                        (let dd' = V.BinOp(V.MINUS, d', d) in
