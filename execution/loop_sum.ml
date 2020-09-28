@@ -1379,23 +1379,25 @@ class dynamic_cfg (eip : int64) = object(self)
 
   method reset = 
     if !opt_trace_loopsum_detailed then
-      Printf.eprintf "Reset dcfg starts with %Lx\n" head;
+      Printf.eprintf "[reset]Reset dcfg starts with %Lx\n" head;
     g#reset; 
     current_node <- -1L;
     last_eip <- -1L;
 
   method make_snap =
-    if !opt_trace_loopsum_detailed then
-      Printf.eprintf "make_snap dcfg starts with %Lx\n" head;
+    if !opt_trace_loopsum && ((Hashtbl.length looplist) > 0) then
+      Printf.eprintf "[make_snap] dcfg starts with %Lx, looplist[%d]\n" head (Hashtbl.length looplist);
     g#make_snap;
-    Hashtbl.iter (fun _ l -> l#make_snap) looplist;
+    Hashtbl.iter (fun (t, h) l -> 
+                    Printf.eprintf "[make_snap] snap loop (%Lx, %Lx)\n" t h; 
+                    l#make_snap) looplist;
     current_node_snap <- current_node;
     last_eip_snap <- last_eip;
     loopstack_snap <- Stack.copy loopstack
 
   method reset_snap =
-    if !opt_trace_loopsum_detailed then
-      Printf.eprintf "Reset_snap dcfg starts with %Lx\n" head;
+    if !opt_trace_loopsum && ((Hashtbl.length looplist) > 0) then
+      Printf.eprintf "[reset_snap] dcfg starts with %Lx, looplist[%d]\n" head (Hashtbl.length looplist);
     g#reset_snap;
     current_node <- current_node_snap;
     last_eip <- last_eip_snap;
