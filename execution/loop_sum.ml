@@ -1400,12 +1400,7 @@ class dynamic_cfg (eip : int64) = object(self)
     current_node <- current_node_snap;
     last_eip <- last_eip_snap;
     loopstack <- Stack.copy loopstack_snap;
-    let func hd l = 
-      if (l#in_loop current_node) then 
-          (Stack.push hd loopstack;
-           l#reset_snap
-          )
-    in
-      Hashtbl.iter func looplist  
-
+    Hashtbl.iter (fun (t, h) l ->
+                    Printf.eprintf "[reset_snap] snap loop (%Lx, %Lx)\n" t h; 
+                    l#reset_snap) looplist;
 end
