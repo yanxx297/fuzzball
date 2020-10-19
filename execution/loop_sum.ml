@@ -819,8 +819,7 @@ class loop_record tail head g= object(self)
     in
       check_dup lss n
 
-  method private print_lss =
-    Printf.eprintf "lss length %d\n" (List.length lss);
+  method private print_lss lss =
     List.iteri (fun i (ivt, gt, bdt, geip) ->
                   Printf.eprintf "lss[%d]:\n" i;
                   self#print_ivt ivt;
@@ -854,7 +853,10 @@ class loop_record tail head g= object(self)
           Printf.eprintf "lss already exist, ignore\n"
         else
           lss <- lss @ [(ivt, gt, Hashtbl.copy bdt, geip)];
-        self#print_lss
+        Printf.eprintf "[loopsum] new at loop iter %d\n" (self#get_iter);
+        self#print_lss [(ivt, gt, Hashtbl.copy bdt, geip)];
+        Printf.eprintf "[loopsum] current lss, length =  %d\n" (List.length lss);
+        self#print_lss lss
 
   method private compute_precond loopsum check eval_cond simplify unwrap_temp 
           query_unique_value (run_slice: V.stmt list -> unit) =
