@@ -37,7 +37,7 @@ LDFLAGS += -p -pg
 endif
 
 export OCAMLFLAGS
-
+export OCAMLLDFLAGS += -warn-error -a
 # default subprojects to build
 ifndef SUBPROJS
 	export SUBPROJS = fuzzball test_insn vinegrind
