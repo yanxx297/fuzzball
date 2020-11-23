@@ -7,7 +7,6 @@
  implementation is pure symbolic.
 *)
 
-module DS = Set.Make (Int64);;
 module V = Vine;;
 
 exception LoopsumNotReady
@@ -15,6 +14,7 @@ exception LoopsumNotReady
 open Exec_options;;
 open Frag_simplify;;
 open Exec_exceptions;;
+open Loopsum_format;;
 
 (* Split a jmp condition to (lhs, rhs, op)*)
 (* b := the in loop side of the cjmp (true/false) *)
