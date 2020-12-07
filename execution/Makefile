@@ -35,7 +35,7 @@ export SOURCES = \
 	smtlib_external_engine.mli smtlib_external_engine.ml \
 	smtlib_batch_engine.mli smtlib_batch_engine.ml \
 	pointer_management.mli pointer_management.ml \
-	loopsum_format.mli loopsum_format.ml \
+	debug_printer.mli debug_printer.ml \
 	loop_sum.mli loop_sum.ml \
 	concrete_memory.mli concrete_memory.ml \
 	granular_memory.mli granular_memory.ml \
