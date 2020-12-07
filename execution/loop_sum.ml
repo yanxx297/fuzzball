@@ -381,14 +381,6 @@ class loop_record tail head g= object(self)
         ) ivt;
         !res
 
-  method private ivt_search off = 
-    let res = ref None in
-    let loop ((offset, v0, v, v', dv_opt) as iv) = (
-      if off = offset then res := Some iv
-    ) in 
-      List.iter loop ivt;
-      !res
-
   method is_iv_cond cond = 
     let res = Hashtbl.mem iv_cond_t cond in
       res
@@ -451,28 +443,18 @@ class loop_record tail head g= object(self)
            | false  -> (Printf.eprintf "0x%08Lx is not in the loop <0x%08Lx>\n" eip id));
       res
 
-
-  (* FIXME: consider the situation that a variable is updated mutiple times in the same loop iteration*)
   method add_iv (offset: int64) (exp: V.exp) =
-    let replace_iv (offset, v0, v, v', dv) = 
-      (let rec loop l =
-         (match l with
-            | iv::l' -> (
-                let (offset', _, _, _, _) = iv in
-                  if offset' = offset then [(offset, v0, v, v', dv)] @ l' 
-                  else [iv] @ (loop l'))
-            | [] -> [])
-       in
-         ivt <- loop ivt)
+    let rec loop ivt =
+      match ivt with
+        | iv::l ->
+            let (off, v0, v, v', dv) = iv in
+              if off = offset && not (v' = exp) then [(off, v0, v, exp, dv)] @ l
+              else [iv] @ (loop l)
+        | [] -> 
+            if iter = 2 then [(offset, exp, exp, exp, None)]
+            else []
     in
-    match (self#ivt_search offset) with
-      | Some iv -> 
-          let (offset, v0, v, v', dv) = iv in
-            if not (v' = exp) then replace_iv (offset, v0, v, exp, dv)
-      | None -> 
-          if iter = 2 then 
-            (Printf.eprintf "Add new iv with offset = %Lx\n" offset;
-             ivt <- ivt @ [(offset, exp, exp, exp, None)])
+      ivt <- loop ivt
 
   (*Guard table: (eip, op, ty, D0_e, slice, slice_g, D, dD, b, exit_eip)*)
   (*D0_e: the code exp of the jump condition's location*)
