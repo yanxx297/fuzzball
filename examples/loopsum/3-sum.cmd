@@ -1,13 +1,13 @@
 ../../exec_utils/fuzzball \
--trace-insns -trace-temps -trace-decisions -trace-register-updates -trace-stores -trace-loads \
+-trace-insns -trace-decisions -trace-register-updates -trace-stores -trace-loads \
 -table-limit 10 -trace-tables \
--trace-decision-tree \
+-trace-temps \
 -save-decision-tree-dot /tmp/3-sum.dot \
 -extra-condition 'n:reg32_t<=90:reg32_t' \
 -check-condition-at '0x0804840f:mem[R_ESP:reg32_t+0x28:reg32_t]:reg32_t<>0xffffffff:reg32_t' \
 -trace-conditions -trace-iterations \
 -solve-final-pc -trace-assigns \
--use-loopsum -trace-loopsum-detailed -trace-loop-detailed \
+-use-loopsum -trace-loopsum \
 -fuzz-start-addr 0x08048426 -symbolic-word 0x0804a01c=n \
--solver smtlib -solver-path ../../../../z3/build/z3 \
+-solver smtlib-batch -solver-path ../../../../z3/build/z3 -save-solver-files -trace-solver \
 -linux-syscalls -trace-stopping 3-sum -- ./3-sum 0 2>&1

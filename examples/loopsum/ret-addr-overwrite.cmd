@@ -1,4 +1,4 @@
-/export/scratch/Project/loopsum/fuzzball-loopsum/exec_utils/fuzzball \
+../../exec_utils/fuzzball \
 -trace-decision-tree \
 -no-sym-regions \
 -trace-insns -trace-temps -trace-decisions -trace-register-updates -trace-stores -trace-loads \

@@ -1,4 +1,4 @@
-/export/scratch/Project/loopsum/fuzzball-loopsum/exec_utils/fuzzball \
+../../exec_utils/fuzzball \
 -trace-insns -trace-temps -trace-decisions -trace-register-updates -trace-stores -trace-loads \
 -table-limit 10 -trace-tables \
 -check-condition-at '0x0804840f:mem[R_ESP:reg32_t+0x28:reg32_t]:reg32_t<>0xffffffff:reg32_t' \
