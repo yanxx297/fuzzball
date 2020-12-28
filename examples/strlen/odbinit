@@ -1,3 +1,4 @@
+set checkpoints off
 load_printer ../../ocaml/debug.cmo
 load_printer /export/scratch/yanxx297/.opam/4.05.0/lib/extlib/extLib.cma
 load_printer ../../ocaml/vine_util.cmo

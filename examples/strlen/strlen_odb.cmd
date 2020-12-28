@@ -1,4 +1,4 @@
-rlwrap ocamldebug -c 1 ../../exec_utils/fuzzball.dbg \
+rlwrap ocamldebug ../../exec_utils/fuzzball.dbg \
 -trace-insns -trace-decisions -trace-register-updates -trace-stores -trace-loads \
 -table-limit 10 -trace-tables \
 -trace-temps \
