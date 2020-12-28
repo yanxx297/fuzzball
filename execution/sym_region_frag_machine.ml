@@ -2177,7 +2177,8 @@ struct
              let (is_sat, _) = self#query_with_path_cond (self#simplify_exp typ e) true in
                is_sat
            in
-             spfm#update_ivt self#simplify_exp check);
+             spfm#update_ivt self#simplify_exp check;
+             spfm#update_ivt_reg self#simplify_exp check);
       if !opt_check_for_ret_addr_overwrite then
 	self#update_ret_addrs last_insn last_eip eip;
 

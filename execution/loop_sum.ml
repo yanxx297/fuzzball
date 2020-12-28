@@ -365,6 +365,7 @@ class loop_record tail head g= object(self)
   (* offset:= addr offset from stack pointer *)
   (* NOTE: add ty to this table instead of intering it on demand?*)
   val mutable ivt = []
+  val mutable ivt_reg = []
   val iv_cond_t = Hashtbl.create 10
 
   (* Return true if ivt and ivt' are identical *)
@@ -434,6 +435,23 @@ class loop_record tail head g= object(self)
       if (List.length ivt') < (List.length ivt) then ivt <- []
       else ivt <- ivt'
 
+  method update_ivt_reg simplify check =
+    let rec loop ivt = 
+      match ivt with 
+        | iv::l ->            
+            let (eip, reg, v0, v, v', dv_opt) = iv in              
+            let dv' = self#simplify_typecheck simplify (V.BinOp(V.MINUS, v', v)) in
+              if iter = 2 then (eip, reg, v0, v', v', dv_opt)::(loop l)
+              else if iter = 3 then 
+                (eip, reg, self#simplify_typecheck simplify (V.BinOp(V.MINUS, v0, dv')), v', v', Some dv')::(loop l) 
+              else (match (self#check_iv simplify check v v' dv_opt) with
+                      | Some dv' -> (eip, reg, v0, v', v', Some dv')::(loop l)
+                      | None -> (loop l))
+        | [] -> []
+    in
+    let ivt_reg' = loop ivt_reg in
+      ivt_reg <- ivt_reg'
+
   method get_ivt = ivt
 
   method in_loop eip = 
@@ -456,6 +474,19 @@ class loop_record tail head g= object(self)
             else []
     in
       ivt <- loop ivt
+
+  method add_iv_reg (eip: int64) (reg: V.var) (exp: V.exp) =  
+    let rec loop ivt =
+      match ivt with
+        | iv::l ->
+            let (e, r, v0, v, v', dv) = iv in
+              if e = eip && r = reg && not (v' = exp) then [(e, r, v0, v, exp, dv)] @ l
+              else [iv] @ (loop l)
+        | [] -> 
+            if iter = 2 then [(eip, reg, exp, exp, exp, None)]
+            else []
+    in
+      ivt_reg <- loop ivt_reg
 
   (*Guard table: (eip, op, ty, D0_e, slice, slice_g, D, dD, b, exit_eip)*)
   (*D0_e: the code exp of the jump condition's location*)
@@ -742,14 +773,23 @@ class loop_record tail head g= object(self)
                           self#add_slice eip d0_e slice;
                           self#add_bd eip b))))
 
-  method private print_ivt ivt = 
-    Printf.eprintf "* Inductive Variables Table [%d]\n" (List.length ivt);
-    List.iteri (fun i (offset, v0, v, v', dv) ->
-                  Printf.eprintf "[%d]\tmem[sp+%Lx] = %s " i offset (V.exp_to_string v0);
-                  match dv with
-                    | Some d -> Printf.eprintf "\t(+ %s)\n" (V.exp_to_string d)
-                    | None -> Printf.eprintf "\t [dV N/A]\n"
-    ) ivt
+  method private print_ivt ivt =
+    let print_dv dv =
+      match dv with
+        | Some d -> Printf.eprintf "\t(+ %s)\n" (V.exp_to_string d)
+        | None -> Printf.eprintf "\t [dV N/A]\n"
+    in
+      Printf.eprintf "* Inductive Variables Table [%d]\n" ((List.length ivt) + (List.length ivt_reg));
+      List.iteri (fun i (offset, v0, v, v', dv) ->
+                    Printf.eprintf "[%d]\tmem[sp+%Lx] = %s " i offset (V.exp_to_string v0);
+                    print_dv dv
+      ) ivt;
+      List.iteri (fun i (eip, reg, v0, v, v', dv) ->
+                    let (_, s, _) = reg in
+                      Printf.eprintf "[%d]\t0x%Lx %s = %s " i eip s (V.exp_to_string v0);
+                      print_dv dv
+      ) ivt_reg
+
 
   method private print_gt gt =
     Printf.eprintf "* Guard Table [%d]\n" (List.length gt);
@@ -1089,6 +1129,7 @@ class loop_record tail head g= object(self)
     Printf.eprintf "[reset] reset iter to 0\n";
     loopsum_status <- None;
     ivt <- [];
+    ivt_reg <- [];
     gt <- [];
 
   method make_snap =
@@ -1173,11 +1214,23 @@ class dynamic_cfg (eip : int64) = object(self)
         | None -> ()
         | Some l -> l#update_ivt simplify check
 
+  method update_ivt_reg simplify check = 
+    let loop = self#get_current_loop in
+      match loop with
+        | None -> ()
+        | Some l -> l#update_ivt_reg simplify check
+
   method add_iv addr exp =
     let loop = self#get_current_loop in
       match loop with
         | None -> ()
         | Some l  -> l#add_iv addr exp
+
+  method add_iv_reg eip reg exp =
+    let loop = self#get_current_loop in
+      match loop with
+        | None -> ()
+        | Some l  -> l#add_iv_reg eip reg exp
 
   method is_iv_cond cond=
     let loop = self#get_current_loop in

@@ -552,7 +552,9 @@ class virtual fragment_machine = object
   method virtual in_loop : int64 -> bool
   method virtual get_loop_head : int64
   method virtual add_iv : int64 -> Vine.exp -> unit
+  method virtual add_iv_reg : int64 -> Vine.var -> Vine.exp -> unit
   method virtual update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
+  method virtual update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method virtual print_dt : unit
   method virtual add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
@@ -709,10 +711,20 @@ struct
         | None -> ()
         | Some g -> g#add_iv offset exp
 
+    method add_iv_reg eip reg exp = 
+      match current_dcfg with
+        | None -> ()
+        | Some g -> g#add_iv_reg eip reg exp
+
     method update_ivt simplify check = 
       match current_dcfg with
         | None -> ()
         | Some g -> g#update_ivt simplify check
+
+    method update_ivt_reg simplify check = 
+      match current_dcfg with
+        | None -> ()
+        | Some g -> g#update_ivt_reg simplify check
 
     method is_iv_cond cond = 
       match current_dcfg with
@@ -3069,7 +3081,18 @@ struct
 		     let trace_eval () =
 		       Printf.eprintf "    %s <- %s\n" s (D.to_string_32 rhs)
 		     in
-		       if !opt_trace_eval then
+                       if String.sub s 0 2 = "R_" &&
+                          not (String.sub s 3 1 = "F") then
+                         (let r = match t with
+                            | V.REG_1 -> D.to_symbolic_1 rhs
+                            | V.REG_8 -> D.to_symbolic_8 rhs
+                            | V.REG_16 -> D.to_symbolic_16 rhs
+                            | V.REG_32 -> D.to_symbolic_32 rhs
+                            | V.REG_64 -> D.to_symbolic_64 rhs
+                            | _ -> failwith ""
+                          in
+                            self#add_iv_reg self#get_eip v r);
+                       if !opt_trace_eval then
 			 trace_eval ()
 		       else if !opt_trace_register_updates then
 			 if String.sub s 0 1 = "T" then

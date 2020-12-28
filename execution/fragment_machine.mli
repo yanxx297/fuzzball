@@ -310,7 +310,9 @@ class virtual fragment_machine : object
   method virtual in_loop : int64 -> bool
   method virtual get_loop_head : int64
   method virtual add_iv : int64 -> Vine.exp -> unit
+  method virtual add_iv_reg : int64 -> Vine.var -> Vine.exp -> unit
   method virtual update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
+  method virtual update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method virtual print_dt : unit
   method virtual add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
@@ -622,7 +624,9 @@ method populate_concolic_string : ?prov:Interval_tree.provenance -> string -> in
     method in_loop : int64 -> bool
     method get_loop_head : int64
     method add_iv : int64 -> Vine.exp -> unit
+    method add_iv_reg : int64 -> Vine.var -> Vine.exp -> unit
     method update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
+    method update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
     method is_iv_cond : Vine.exp -> bool
     method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
