@@ -6,6 +6,6 @@ rlwrap ocamldebug ../../exec_utils/fuzzball.dbg \
 -trace-conditions -trace-iterations \
 -solve-final-pc -trace-assigns \
 -use-loopsum -trace-loopsum \
--fuzz-start-addr 0x08048427 -symbolic-string 0x0804a040+1024 \
+-fuzz-start-addr 0x080483f6 -symbolic-string 0x0804a040+64 \
 -solver smtlib-batch -solver-path ../../../../z3/build/z3 -save-solver-files -trace-solver \
 -linux-syscalls -trace-stopping strlen -- ./strlen 0 2>&1 |tee /tmp/dbg_strlen.log

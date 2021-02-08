@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#define SIZE 1024
+#define SIZE 64
 char str[SIZE];
 
 size_t mystrlen(char *str){
