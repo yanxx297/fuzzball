@@ -73,7 +73,8 @@ sig
     method print_dt : unit
     method is_iv_cond : Vine.exp -> bool
     method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
-      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
+      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) ->
+      (Vine.exp -> Vine.exp) -> unit
     method handle_branch: int64 -> Vine.exp -> bool -> unit
     method do_check_loopsum : unit
     method run_slice: Vine.stmt list -> unit

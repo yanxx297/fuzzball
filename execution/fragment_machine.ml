@@ -557,7 +557,8 @@ class virtual fragment_machine = object
   method virtual update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method virtual print_dt : unit
   method virtual add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
-      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
+      (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> 
+      (Vine.exp -> Vine.exp) -> unit
   method virtual handle_branch : int64 -> Vine.exp -> bool -> unit
   method virtual simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
   method virtual run_slice: Vine.stmt list -> unit
@@ -731,7 +732,15 @@ struct
         | None -> false
         | Some g -> g#is_iv_cond cond
 
-    method add_g g check simplify query_unique_value = 
+    method private lvals_to_vars lvals =
+      let rec loop l =
+        match l with
+          | V.Temp(var)::l' | V.Mem(var, _, _)::l' -> var::(loop l')
+          | [] -> []
+      in
+        loop lvals
+
+    method add_g g check simplify query_unique_value eval_cond = 
       match current_dcfg with
         | None -> ()
         | Some dcfg -> 
@@ -739,12 +748,13 @@ struct
              let d0_e = self#replace_temps_exp cond in 
                (match (dcfg#is_known_guard eip) with
                   | Some (_, _, _, _, slice, slice_g, _, _, _, _) -> 
-                      dcfg#add_g (eip, op, ty, d0_e, slice, slice_g, lhs, rhs, b, eeip) check simplify query_unique_value
+                      dcfg#add_g (eip, op, ty, d0_e, slice, slice_g, lhs, rhs, b, eeip) check simplify query_unique_value eval_cond
                   | None ->
-                      (let (slice, _) = self#prog_slicing (self#get_vars cond) path_cache true in
-                       let (slice_g, _) = self#prog_slicing (self#get_vars cond) path_cache false in
-                         self#print_slice slice_g;
-                         dcfg#add_g (eip, op, ty, d0_e, slice, slice_g, lhs, rhs, b, eeip) check simplify query_unique_value)))
+                      (let (decl, slice) = self#prog_slicing (self#get_vars cond) path_cache true in
+                       let (decl_g, slice_g) = self#prog_slicing (self#get_vars cond) path_cache false in
+                       let prog = ((self#lvals_to_vars decl), slice) in
+                       let prog_g = ((self#lvals_to_vars decl_g), slice_g) in
+                         dcfg#add_g (eip, op, ty, d0_e, prog, prog_g, lhs, rhs, b, eeip) check simplify query_unique_value eval_cond)))
 
     val temps = V.VarHash.create 100
 
@@ -760,6 +770,7 @@ struct
                in        
                  slice_var_count <- slice_var_count + 1;
                  Hashtbl.add slice_var_list id v';
+                 V.VarHash.add temps v' (D.uninit);
                  v')
 
     method private replace_temps_exp exp =
@@ -803,7 +814,6 @@ struct
            | V.Ite(exp1, exp2, exp3) -> ((loop exp1) @ (loop exp2) @ (loop exp3))
            | _ -> [])
       in
-        Printf.eprintf "get vars from (%s)\n" (V.exp_to_string exp);
         loop exp
 
     method private print_vars vars =
@@ -814,17 +824,13 @@ struct
         Printf.eprintf "%s]\n" !vars_str        
         
     method private prog_slicing vars prog do_replace =
+      let decl = ref [] in
       let rec check_vars lval vars =
         (match vars with
            | var::rest ->
-               (if lval = var then 
-                  (if !opt_trace_loopsum_detailed then
-                     Printf.eprintf "Remove %s = %s\n" (V.exp_to_string (V.Lval(lval))) (V.exp_to_string (V.Lval(var))); 
-                   (true, rest))
-                else 
-                  (if !opt_trace_loopsum_detailed then 
-                     Printf.eprintf "No Remove %s != %s\n" (V.exp_to_string (V.Lval(lval))) (V.exp_to_string (V.Lval(var)));
-                   let (res, tail) = check_vars lval rest in (res, var::tail)))
+               (if lval = var then (true, rest) 
+                else let (res, tail) = check_vars lval rest in 
+                  (res, var::tail))
            | [] -> (false, vars)
         )
       in
@@ -832,7 +838,10 @@ struct
         (match stmt with
            | V.Move(lval, exp) ->
                (let (is_decl, vars) = check_vars lval vars in
-                  if is_decl then (true, (self#get_vars exp) @ vars)
+                  if is_decl then 
+                    let newvar = (self#get_vars exp) in 
+                      decl := newvar@(!decl);
+                      (true, newvar@vars)
                   else (false, vars)
                )
            | _ -> (false, vars))
@@ -841,31 +850,32 @@ struct
         (match l with
            | stmt::rest ->
                (let (in_slice, vars) = stmt_scan vars stmt in
-                let (tail, vars) = loop_insn vars rest in
-                  if in_slice then (stmt::tail, vars)
-                  else (tail, vars))
-           | [] -> ([], vars))
+                let (vars, tail) = loop_insn vars rest in
+                  if in_slice then (vars, stmt::tail)
+                  else (vars, tail))
+           | [] -> (vars, []))
       in
       let rec loop_prog vars prog = 
         (match prog with
            | l::rest ->
-               (let (curr, vars) = loop_insn vars (List.rev l) in
-                let (tail, vars') = loop_prog vars rest in
-                  (curr @ tail, vars')
+               (let (vars, curr) = loop_insn vars (List.rev l) in
+                let (vars', tail) = loop_prog vars rest in
+                  (vars', curr @ tail)
                )
-           | [] -> ([], vars))
+           | [] -> (vars, []))
       in
-        Printf.eprintf "Program slicing start.\n";
-        let (l, vars) = loop_prog vars prog in
+        let (vars, l) = loop_prog vars prog in
           if do_replace then 
             (let l = 
                (List.map(fun stmt ->
                            self#replace_temps stmt
                )l)
              in
-               (List.rev l, vars))
+             let decl' = ref [] in 
+               Hashtbl.iter (fun _ v -> decl := V.Temp(v)::(!decl)) slice_var_list; 
+               (!decl@(!decl'), List.rev l))
           else
-            (List.rev l, vars)
+            (!decl, List.rev l)
 
     method private print_slice slice =
       Printf.eprintf "Slicing result:\n";
@@ -878,12 +888,11 @@ struct
         | None -> ()
         | Some g ->
             (if not (g#find_slice eip) then
-               (let (slice, _) = self#prog_slicing (self#get_vars cond) path_cache true
+               (let (decl, slice) = self#prog_slicing (self#get_vars cond) path_cache true
                 in
                   (if (List.length slice) = 0 then () 
                    else
-                     (self#print_slice slice;
-                      g#add_slice eip (self#replace_temps_exp cond) slice)));
+                     g#add_slice eip (self#replace_temps_exp cond) slice));
              g#add_bd eip b)
 
     (* A stack of useLoopsum? nodes on current path*)

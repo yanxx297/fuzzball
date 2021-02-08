@@ -28,20 +28,20 @@ class loop_record : int64 -> int64 -> simple_graph -> object
   method update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method is_iv_cond : Vine.exp -> bool
   method is_known_guard : int64 ->
-    (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.stmt list * Vine.exp option *
+    (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
      Vine.exp option * bool * int64) list ->
-    (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.stmt list * Vine.exp option *
+    (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
      Vine.exp option * bool * int64) option
-  method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.stmt list * Vine.exp * Vine.exp * bool * int64 ->
-    (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
-  method get_gt : (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.stmt list * Vine.exp option *
+  method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp * Vine.exp * bool * int64 ->
+    (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> (Vine.exp -> Vine.exp) -> unit
+  method get_gt : (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
                    Vine.exp option * bool * int64) list                                                                  
   method get_lss: ((int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option) list *
-                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.stmt list * Vine.exp option *
+                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
                     Vine.exp option * bool * int64)
                      list * (int64, bool) Hashtbl.t * int64) list                                                                  
   method set_lss: ((int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option) list *
-                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.stmt list * Vine.exp option *
+                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program* Vine.exp option *
                     Vine.exp option * bool * int64)
                      list * (int64, bool) Hashtbl.t * int64) list -> unit
   method save_lss : int64 -> unit
@@ -86,10 +86,10 @@ class dynamic_cfg : int64 -> object
   method update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method is_iv_cond : Vine.exp -> bool
   method is_known_guard : int64 ->
-    (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.stmt list * Vine.exp option *
+    (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
      Vine.exp option * bool * int64) option
-  method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.stmt list * Vine.stmt list * Vine.exp * Vine.exp * bool * int64 ->
-    (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> unit
+  method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program *  Vine.program * Vine.exp * Vine.exp * bool * int64 ->
+    (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> (Vine.exp -> Vine.exp) -> unit
   method make_snap : unit
   method reset_snap : unit
   method check_loopsum : int64 ->

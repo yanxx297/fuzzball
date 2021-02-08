@@ -158,7 +158,7 @@ let split_to_prime d =
       j := !j + 1
     done;
     (!d', !j)
-
+    
 class simple_node id = object(self)
   val mutable domin = DS.singleton id
   val mutable domin_snap = DS.singleton id
@@ -539,7 +539,7 @@ class loop_record tail head g= object(self)
 
   (* Compute expected loop count from a certain guard*)
   (* D and dD should not be 0, otherwise current path never enter/exit the loop *)
-  method private compute_ec (_, op, ty, d0_e, slice, _,  _, dd_opt, b, _) 
+  method private compute_ec (_, op, ty, d0_e, (_, slice), _,  _, dd_opt, b, _) 
           check eval_cond simplify unwrap_temp query_unique_value run_slice =
     run_slice slice;
     let e = eval_cond d0_e in
@@ -722,9 +722,16 @@ class loop_record tail head g= object(self)
       ) l in
       lss <- lss'
 
+  (* Check function summaries *)
+  method private check_func (prog: V.program) cond simplify eval_cond =
+    let expr = copy_const_prop prog in
+      ignore(expr)
+
   (* Add or update a guard table entry*)
-  method add_g g' check simplify query_unique_value =
-    let (eip, op, ty, d0_e, (slice: V.stmt list), (slice_g: V.stmt list), lhs, rhs, b, eeip) = g' in
+  method add_g g' check simplify query_unique_value (eval_cond: V.exp -> V.exp) =
+    let (eip, op, ty, d0_e, prog, (prog_g: V.program), lhs, rhs, b, eeip) = g' in
+      if eip = 0x8048420L then 
+        ();
       if !opt_trace_loopsum_detailed then
         Printf.eprintf "At iter %d, check cjmp at %08Lx, op = %s\n" iter eip (V.binop_to_string op);
       (match self#is_known_guard eip gt with
@@ -739,7 +746,7 @@ class loop_record tail head g= object(self)
                             | Some (v: int64) ->
                                 (Printf.eprintf "query result: 0x%Lx\n" v;
                                  if not (Int64.equal v 0L) then
-                                   self#replace_g (eip, op, ty, d0_e, slice, slice_g, Some d', 
+                                   self#replace_g (eip, op, ty, d0_e, prog, prog_g, Some d', 
                                                    Some (V.Constant(V.Int(ty, v))), 
                                                    b, eip))
                             | None ->())
@@ -748,17 +755,18 @@ class loop_record tail head g= object(self)
                           match query_unique_value dd' ty with
                             | Some (v: int64) ->
                                 (if check (V.BinOp(V.EQ, dd, V.Constant(V.Int(ty, v)))) then
-                                   self#replace_g (eip, op, ty, d0_e, slice, slice_g, Some d', Some dd, b, eip)
+                                   self#replace_g (eip, op, ty, d0_e, prog, prog_g, Some d', Some dd, b, eip)
                                  else Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
                             | None -> Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
                    | _ -> ()))
          | None -> 
              (if iter = 2 then
                 (let d_opt = self#compute_distance op ty lhs rhs check simplify in
-                 let g = (eip, op, ty, d0_e, slice, slice_g, d_opt, None, b, eeip) in
+                 let g = (eip, op, ty, d0_e, prog, prog_g, d_opt, None, b, eeip) in
                    match d_opt with
                      | Some d ->
                          (gt <- gt @ [g];
+                           self#check_func prog d0_e simplify eval_cond; 
                           match (Hashtbl.find_opt bt eip) with
                             | Some branch -> 
                                 (Hashtbl.remove bt eip;
@@ -770,8 +778,9 @@ class loop_record tail head g= object(self)
                          (* Currently not sure whether this CJmp is a Guard or in-loop branch *)
                          (* Add it as a branch now and remove later if it is a Guard *)
                          (Printf.eprintf "add_g: fail to compute D0 at %Lx, still add it to bt and bdt\n" eip;
-                          self#add_slice eip d0_e slice;
-                          self#add_bd eip b))))
+                          let (_, slice) = prog in
+                            self#add_slice eip d0_e slice;
+                            self#add_bd eip b))))
 
   method private print_ivt ivt =
     let print_dv dv =
@@ -1032,7 +1041,7 @@ class loop_record tail head g= object(self)
         match g_opt with
           | None -> failwith ""
           | Some g ->
-              (let (_, _, _, _, slice, slice_g,  _, _, _, eeip) = g in
+              (let (_, _, _, _, _, (_, slice_g),  _, _, _, eeip) = g in
                let ec_opt = self#compute_ec g check eval_cond simplify unwrap_temp 
                               query_unique_value run_slice in 
                let vt = 
@@ -1238,11 +1247,11 @@ class dynamic_cfg (eip : int64) = object(self)
         | None -> false
         | Some l  -> l#is_iv_cond cond
 
-  method add_g g check simplify query_unique_value =
+  method add_g g check simplify query_unique_value eval_cond =
     let loop = self#get_current_loop in
       match loop with
         | None -> ()
-        | Some l  -> l#add_g g check simplify query_unique_value
+        | Some l  -> l#add_g g check simplify query_unique_value eval_cond
 
   method add_bd eip b = 
     let loop = self#get_current_loop in

@@ -14,3 +14,4 @@ val stmt_size : Vine.stmt -> int
 val rm_unused_stmts : Vine.stmt list -> Vine.stmt list
 
 val simplify_frag : Vine.program -> Vine.program
+val copy_const_prop : Vine.program -> Vine.program

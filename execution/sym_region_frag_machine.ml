@@ -1174,6 +1174,10 @@ struct
     (* Analyze the condition to get right and left side*)
     (* This method runs after srfm#run()*)
     method eval_cjmp exp targ1 targ2 =
+      let eval_cond exp =
+        let (_, e) = self#eval_cjmp_cond exp in
+          e
+      in
       let (v, e) = self#eval_cjmp_cond exp in
       let b = self#eval_cjmp_targ targ1 targ2 v e in 
         (match spfm#is_guard targ1 targ2 with
@@ -1206,7 +1210,8 @@ struct
                                   Printf.eprintf "%s is not valid\n" (V.exp_to_string e);
                                 not is_sat_r
                             in
-                              spfm#add_g (self#get_eip, op, ty_l, exp, lhs', rhs', b, eeip) is_valid self#simplify_exp spfm#query_unique_value))
+                              spfm#add_g (self#get_eip, op, ty_l, exp, lhs', rhs', b, eeip) 
+                                is_valid self#simplify_exp spfm#query_unique_value eval_cond))
                   | _ -> ())
            | _ -> 
                (let eip = self#get_eip in
