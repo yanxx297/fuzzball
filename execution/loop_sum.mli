@@ -1,3 +1,7 @@
+type stmts = (int64 * Vine.stmt) list
+type decls = (Vine.var, int64) Hashtbl.t 
+type slice = decls * stmts 
+
 val split_cond : Vine.exp -> bool ->
   (Vine.var -> Vine.exp option) ->
   Vine.exp option * Vine.exp option * Vine.binop_type
@@ -28,26 +32,26 @@ class loop_record : int64 -> int64 -> simple_graph -> object
   method update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method is_iv_cond : Vine.exp -> bool
   method is_known_guard : int64 ->
-    (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
+    (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
      Vine.exp option * bool * int64) list ->
-    (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
+    (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
      Vine.exp option * bool * int64) option
-  method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp * Vine.exp * bool * int64 ->
+  method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp * Vine.exp * bool * int64 ->
     (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> (Vine.exp -> Vine.exp) -> unit
-  method get_gt : (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
+  method get_gt : (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
                    Vine.exp option * bool * int64) list                                                                  
   method get_lss: ((int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option) list *
-                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
+                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
                     Vine.exp option * bool * int64)
                      list * (int64, bool) Hashtbl.t * int64) list                                                                  
   method set_lss: ((int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option) list *
-                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program* Vine.exp option *
+                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
                     Vine.exp option * bool * int64)
                      list * (int64, bool) Hashtbl.t * int64) list -> unit
   method save_lss : int64 -> unit
   method add_insn : int64 -> unit
   method add_bd : int64 -> bool -> unit
-  method add_slice : int64 -> Vine.exp -> Vine.stmt list -> unit
+  method add_slice : int64 -> Vine.exp -> stmts -> unit
   method find_slice : int64 -> bool
   method get_status : bool option
   method set_status : bool option -> unit
@@ -66,8 +70,8 @@ class loop_record : int64 -> int64 -> simple_graph -> object
     (int -> bool) ->
     (Vine.exp -> Vine.typ -> int64 option) ->
     int -> (int -> int) -> (int -> int) -> (int -> unit) -> 
-    (Vine.stmt list -> unit) ->
-    (int64 * Vine.exp) list *  Vine.stmt list * int64  
+    (stmts -> unit) ->
+    (int64 * Vine.exp) list * stmts * int64  
   method compute_loop_body: int64 -> int64 -> simple_graph -> unit
   method finish_loop : unit
 end
@@ -86,9 +90,9 @@ class dynamic_cfg : int64 -> object
   method update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method is_iv_cond : Vine.exp -> bool
   method is_known_guard : int64 ->
-    (int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program * Vine.program * Vine.exp option *
+    (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
      Vine.exp option * bool * int64) option
-  method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.program *  Vine.program * Vine.exp * Vine.exp * bool * int64 ->
+  method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp * Vine.exp * bool * int64 ->
     (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> (Vine.exp -> Vine.exp) -> unit
   method make_snap : unit
   method reset_snap : unit
@@ -106,10 +110,10 @@ class dynamic_cfg : int64 -> object
     (int -> bool) ->
     (Vine.exp -> Vine.typ -> int64 option) ->
     int -> (int -> int) -> (int -> int) -> (int -> loop_record -> unit) -> 
-    (Vine.stmt list -> unit) ->
-    (int64 * Vine.exp) list *  Vine.stmt list * int64  
+    (stmts -> unit) ->
+    (int64 * Vine.exp) list * stmts * int64  
   method add_bd : int64 -> bool -> unit
-  method add_slice : int64 -> Vine.exp -> Vine.stmt list -> unit
+  method add_slice : int64 -> Vine.exp -> stmts -> unit
   method find_slice : int64 -> bool
   method mark_extra_all_seen : (int * loop_record) list -> (int -> unit) ->
     (int -> bool) -> (int -> int) -> (int -> int) -> unit

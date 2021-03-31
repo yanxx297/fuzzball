@@ -320,7 +320,7 @@ class virtual fragment_machine : object
   method virtual handle_branch : int64 -> Vine.exp -> bool -> unit
   method virtual simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
   method virtual do_check_loopsum : unit 
-  method virtual run_slice: Vine.stmt list -> unit
+  method virtual run_slice: Loop_sum.stmts -> unit
   method virtual check_loopsum : int64 ->
     (Vine.exp -> bool) ->
     (Vine.exp -> unit) ->
@@ -334,7 +334,7 @@ class virtual fragment_machine : object
     bool ->
     (int -> bool) ->
     (Vine.exp -> Vine.typ -> int64 option) ->
-    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * Vine.stmt list * int64  
+    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * Loop_sum.stmts * int64  
   method virtual mark_extra_all_seen : (int -> unit) ->
     (int -> bool) -> (int -> int) -> (int -> int) -> unit
   method virtual is_loop_head : int64 -> bool
@@ -634,7 +634,7 @@ method populate_concolic_string : ?prov:Interval_tree.provenance -> string -> in
       (Vine.exp -> Vine.exp) -> unit
     method handle_branch: int64 -> Vine.exp -> bool -> unit
     method do_check_loopsum : unit 
-    method run_slice: Vine.stmt list -> unit
+    method run_slice: Loop_sum.stmts -> unit
     method check_loopsum : int64 -> 
     (Vine.exp -> bool) ->
     (Vine.exp -> unit) ->
@@ -648,7 +648,7 @@ method populate_concolic_string : ?prov:Interval_tree.provenance -> string -> in
     bool ->
     (int -> bool) ->
     (Vine.exp -> Vine.typ -> int64 option) ->
-    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list *  Vine.stmt list * int64  
+    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * Loop_sum.stmts * int64  
     method mark_extra_all_seen : (int -> unit) ->
         (int -> bool) -> (int -> int) -> (int -> int) -> unit
     method is_loop_head : int64 -> bool

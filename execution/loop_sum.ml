@@ -16,6 +16,10 @@ open Frag_simplify;;
 open Exec_exceptions;;
 open Debug_printer;;
 
+type stmts = (int64 * Vine.stmt) list
+type decls = (Vine.var, int64) Hashtbl.t 
+type slice = decls * stmts 
+
 (* Split a jmp condition to (lhs, rhs, op)*)
 (* b := the in loop side of the cjmp (true/false) *)
 (* TODO: add support to more operations*)
@@ -323,7 +327,7 @@ class loop_record tail head g= object(self)
   method add_bd eip b =
     Hashtbl.replace bdt eip b
 
-  method add_slice (eip:int64) (cond: V.exp) (slice: V.stmt list) = 
+  method add_slice (eip:int64) (cond: V.exp) slice = 
     Hashtbl.replace bt eip (cond, slice)
 
   method find_slice eip = 
@@ -540,7 +544,7 @@ class loop_record tail head g= object(self)
   (* Compute expected loop count from a certain guard*)
   (* D and dD should not be 0, otherwise current path never enter/exit the loop *)
   method private compute_ec (_, op, ty, d0_e, (_, slice), _,  _, dd_opt, b, _) 
-          check eval_cond simplify unwrap_temp query_unique_value run_slice =
+          check eval_cond simplify unwrap_temp query_unique_value (run_slice: stmts -> unit) =
     run_slice slice;
     let e = eval_cond d0_e in
     match (split_cond e b unwrap_temp) with
@@ -723,13 +727,12 @@ class loop_record tail head g= object(self)
       lss <- lss'
 
   (* Check function summaries *)
-  method private check_func (prog: V.program) cond simplify eval_cond =
-    let expr = copy_const_prop prog in
-      ignore(expr)
+  method private check_func (slice: slice) cond simplify eval_cond =
+    ()
 
   (* Add or update a guard table entry*)
   method add_g g' check simplify query_unique_value (eval_cond: V.exp -> V.exp) =
-    let (eip, op, ty, d0_e, prog, (prog_g: V.program), lhs, rhs, b, eeip) = g' in
+    let (eip, op, ty, d0_e, slice, (slice_g: slice), lhs, rhs, b, eeip) = g' in
       if eip = 0x8048420L then 
         ();
       if !opt_trace_loopsum_detailed then
@@ -746,7 +749,7 @@ class loop_record tail head g= object(self)
                             | Some (v: int64) ->
                                 (Printf.eprintf "query result: 0x%Lx\n" v;
                                  if not (Int64.equal v 0L) then
-                                   self#replace_g (eip, op, ty, d0_e, prog, prog_g, Some d', 
+                                   self#replace_g (eip, op, ty, d0_e, slice, slice_g, Some d', 
                                                    Some (V.Constant(V.Int(ty, v))), 
                                                    b, eip))
                             | None ->())
@@ -755,18 +758,18 @@ class loop_record tail head g= object(self)
                           match query_unique_value dd' ty with
                             | Some (v: int64) ->
                                 (if check (V.BinOp(V.EQ, dd, V.Constant(V.Int(ty, v)))) then
-                                   self#replace_g (eip, op, ty, d0_e, prog, prog_g, Some d', Some dd, b, eip)
+                                   self#replace_g (eip, op, ty, d0_e, slice, slice_g, Some d', Some dd, b, eip)
                                  else Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
                             | None -> Printf.eprintf "Guard at 0x%Lx not inductive\n" eip)
                    | _ -> ()))
          | None -> 
              (if iter = 2 then
                 (let d_opt = self#compute_distance op ty lhs rhs check simplify in
-                 let g = (eip, op, ty, d0_e, prog, prog_g, d_opt, None, b, eeip) in
+                 let g = (eip, op, ty, d0_e, slice, slice_g, d_opt, None, b, eeip) in
                    match d_opt with
                      | Some d ->
                          (gt <- gt @ [g];
-                           self#check_func prog d0_e simplify eval_cond; 
+                           self#check_func slice d0_e simplify eval_cond; 
                           match (Hashtbl.find_opt bt eip) with
                             | Some branch -> 
                                 (Hashtbl.remove bt eip;
@@ -778,8 +781,8 @@ class loop_record tail head g= object(self)
                          (* Currently not sure whether this CJmp is a Guard or in-loop branch *)
                          (* Add it as a branch now and remove later if it is a Guard *)
                          (Printf.eprintf "add_g: fail to compute D0 at %Lx, still add it to bt and bdt\n" eip;
-                          let (_, slice) = prog in
-                            self#add_slice eip d0_e slice;
+                          let (_, stmt) = slice in
+                            self#add_slice eip d0_e stmt;
                             self#add_bd eip b))))
 
   method private print_ivt ivt =
@@ -891,7 +894,7 @@ class loop_record tail head g= object(self)
         self#print_lss lss
 
   method private compute_precond loopsum check eval_cond simplify unwrap_temp 
-          query_unique_value (run_slice: V.stmt list -> unit) =
+          query_unique_value run_slice =
     let (_, gt, bdt, geip) = loopsum in
     let min_g_opt = self#is_known_guard geip gt in 
       match min_g_opt with

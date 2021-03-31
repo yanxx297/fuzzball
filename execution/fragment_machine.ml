@@ -561,7 +561,7 @@ class virtual fragment_machine = object
       (Vine.exp -> Vine.exp) -> unit
   method virtual handle_branch : int64 -> Vine.exp -> bool -> unit
   method virtual simplify_exp : Vine.typ -> Vine.exp -> Vine.exp
-  method virtual run_slice: Vine.stmt list -> unit
+  method virtual run_slice: Loop_sum.stmts -> unit
   method virtual do_check_loopsum : unit 
   method virtual check_loopsum : int64 ->
     (Vine.exp -> bool) ->
@@ -576,7 +576,7 @@ class virtual fragment_machine = object
     bool ->
     (int -> bool) ->
     (Vine.exp -> Vine.typ -> int64 option) ->
-    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * Vine.stmt list * int64  
+    int -> (int -> int) -> (int -> int) -> (int64 * Vine.exp) list * Loop_sum.stmts * int64  
   method virtual mark_extra_all_seen : (int -> unit) ->
     (int -> bool) -> (int -> int) -> (int -> int) -> unit
   method virtual is_loop_head : int64 -> bool
@@ -732,13 +732,14 @@ struct
         | None -> false
         | Some g -> g#is_iv_cond cond
 
-    method private lvals_to_vars lvals =
-      let rec loop l =
-        match l with
-          | V.Temp(var)::l' | V.Mem(var, _, _)::l' -> var::(loop l')
-          | [] -> []
-      in
-        loop lvals
+    method private lvals_to_vars decl =
+      let res = Hashtbl.create 10 in
+        Hashtbl.iter 
+          (fun lval eip ->
+             match lval with
+               |V.Temp(var) | V.Mem(var, _, _) -> Hashtbl.replace res var eip 
+          ) decl;
+        res
 
     method add_g g check simplify query_unique_value eval_cond = 
       match current_dcfg with
@@ -747,31 +748,19 @@ struct
             (let (eip, op, ty, cond, lhs, rhs, b, eeip) = g in
              let d0_e = self#replace_temps_exp cond in 
                (match (dcfg#is_known_guard eip) with
-                  | Some (_, _, _, _, slice, slice_g, _, _, _, _) -> 
+                  | Some (_, _, _, _, (slice: slice), slice_g, _, _, _, _) -> 
                       dcfg#add_g (eip, op, ty, d0_e, slice, slice_g, lhs, rhs, b, eeip) check simplify query_unique_value eval_cond
                   | None ->
-                      (let (decl, slice) = self#prog_slicing (self#get_vars cond) path_cache true in
-                       let (decl_g, slice_g) = self#prog_slicing (self#get_vars cond) path_cache false in
-                       let prog = ((self#lvals_to_vars decl), slice) in
-                       let prog_g = ((self#lvals_to_vars decl_g), slice_g) in
-                         dcfg#add_g (eip, op, ty, d0_e, prog, prog_g, lhs, rhs, b, eeip) check simplify query_unique_value eval_cond)))
+                      (let (decl, stmt) = self#prog_slicing (self#get_vars eip cond) path_cache true in
+                       let (decl_g, stmt_g) = self#prog_slicing (self#get_vars eip cond) path_cache false in
+                       let slice = ((self#lvals_to_vars decl), stmt) in
+                       let slice_g = ((self#lvals_to_vars decl_g), stmt_g) in
+                         dcfg#add_g (eip, op, ty, d0_e, slice, slice_g, lhs, rhs, b, eeip) check simplify query_unique_value eval_cond)))
 
     val temps = V.VarHash.create 100
 
     val mutable slice_var_count = 0
     val mutable slice_var_list = Hashtbl.create 100
-
-    method private replace_var v = 
-      let (id, s, typ) = v in
-        match (Hashtbl.find_opt slice_var_list id) with
-          | Some var -> var
-          | None -> 
-              (let v' = V.newvar (s^Printf.sprintf "_%d" slice_var_count) typ
-               in        
-                 slice_var_count <- slice_var_count + 1;
-                 Hashtbl.add slice_var_list id v';
-                 V.VarHash.add temps v' (D.uninit);
-                 v')
 
     method private replace_temps_exp exp =
       let rec loop e = 
@@ -780,8 +769,11 @@ struct
           | V.FBinOp(op, rm, e1, e2) -> V.FBinOp(op, rm, loop e1, loop e2)
           | V.UnOp(op, e1) -> V.UnOp(op, loop e1)
           | V.FUnOp(op, rm, e1) -> V.FUnOp(op, rm, loop e1)
-          | V.Lval(V.Temp(var)) -> V.Lval(V.Temp(self#replace_var var)) 
-          | V.Lval(V.Mem(var, e1, typ)) -> e
+          | V.Lval(V.Temp(v)) -> 
+              (match (Hashtbl.find_opt slice_var_list v) with
+                 | Some v' -> V.Lval(V.Temp(v'))
+                 | None -> e)
+          | V.Lval(V.Mem(v, e1, typ)) -> e
           | V.Cast(ctyp, typ, e1) -> V.Cast(ctyp, typ, loop e1)
           | V.FCast(ctyp, rm, typ, e1) -> V.FCast(ctyp, rm, typ, loop e1)
           | V.Ite(cond, e1, e2) -> V.Ite(loop cond, loop e1, loop e2)
@@ -793,18 +785,25 @@ struct
     method private replace_temps stmt =
       let rec loop stmt =
         match stmt with
-          | V.Move(V.Temp(var), e) -> V.Move(V.Temp(self#replace_var var), (self#replace_temps_exp e))
+          | V.Move(V.Temp(v), e) -> 
+              (let rhs = self#replace_temps_exp e in
+               let (_, s, typ) = v in
+               let v' = V.newvar (s^Printf.sprintf "_%d" slice_var_count) typ in
+                 slice_var_count <- slice_var_count + 1;
+                 Hashtbl.add slice_var_list v v';
+                 V.VarHash.add temps v' (D.uninit);
+                 V.Move(V.Temp(v'), rhs))
           | V.Move(V.Mem(_, _, _) as m, e) -> V.Move(m, (self#replace_temps_exp e))
           | _ -> stmt
       in loop stmt
 
     (* Given a expression, return a list of all variables it contains *)
-    method private get_vars exp =
+    method private get_vars eip exp =
       let rec loop exp =
         (match exp with
            | V.Lval(lval) -> 
                (match lval with
-                  | V.Temp(_) -> [lval]
+                  | V.Temp(_) -> [(eip, lval)]
                   | _ -> [])
            | V.BinOp(_, exp1, exp2) | V.FBinOp(_, _, exp1, exp2) -> 
                ((loop exp1) @ (loop exp2))
@@ -821,44 +820,95 @@ struct
         List.iter (fun var ->
                      vars_str := !vars_str ^ (V.exp_to_string (V.Lval(var)))
         ) vars;
-        Printf.eprintf "%s]\n" !vars_str        
-        
+        Printf.eprintf "%s]\n" !vars_str      
+
+
+    method private find_var_def decl slice =
+      let rec update_decl eip t stmts =
+        (match stmts with
+           | V.Move(V.Temp(v), _)::stmts' ->
+               (match t with
+                  | V.Temp(_, s, _) ->
+                      let (_, s', _) = v in
+                        if (String.length s) >= (String.length s') &&
+                           String.equal s' (String.sub s 0 (String.length s')) then
+                          Hashtbl.replace !decl t eip
+                        else update_decl eip t stmts'
+                  | _ -> update_decl eip t stmts'
+               )
+           | _::stmts' -> update_decl eip t stmts'
+           | [] -> ())
+      in
+      let rec find_def v l =
+        (match l with
+           | (eip, stmts)::l' -> update_decl eip v stmts 
+           | [] -> ())
+      in
+      let rec find_start eip l =
+        (match l with
+           | (e, _)::l' -> if e = eip then l' else find_start eip l'
+           | [] -> [])
+      in
+      let rec loop eip e =
+        (match e with
+           | V.BinOp(op, e1, e2) -> (loop eip e1; loop eip e2)
+           | V.FBinOp(op, rm, e1, e2) -> (loop eip e1; loop eip e2)
+           | V.UnOp(op, e1) -> loop eip e1
+           | V.FUnOp(op, rm, e1) -> loop eip e1
+           | V.Lval((V.Temp(_) as t)) -> 
+               (let l' = find_start eip path_cache in
+                  find_def t l')
+           | V.Lval(V.Mem(var, e, typ)) -> loop eip e 
+           | V.Cast(ctyp, typ, e1) -> loop eip e1
+           | V.FCast(ctyp, rm, typ, e1) -> loop eip e1
+           | V.Ite(cond, e1, e2) -> (loop eip cond; loop eip e1; loop eip e2)
+           | V.Constant(_)| V.Name(_)| V.Unknown(_) -> () 
+           | V.Let(_, _, _) -> failwith "Unexpected exp type on left side of the formula"
+        )
+             in
+               List.iter (fun stmt ->
+                            match stmt with
+                              | (eip, V.Move(V.Temp(_), e)) -> loop eip e
+                              | _ -> ())
+                 slice;
+
     method private prog_slicing vars prog do_replace =
-      let decl = ref [] in
-      let rec check_vars lval vars =
+      let decl = ref (Hashtbl.create 10) in
+      let rec check_vars (lval: V.lvalue) vars =
         (match vars with
-           | var::rest ->
-               (if lval = var then (true, rest) 
+           | (eip, var)::rest ->
+               (if lval = var then 
+                  (true, rest) 
                 else let (res, tail) = check_vars lval rest in 
-                  (res, var::tail))
+                  (res, (eip, var)::tail))
            | [] -> (false, vars)
         )
       in
-      let stmt_scan vars stmt =
+      let check_stmt (eip: int64) vars stmt =
         (match stmt with
            | V.Move(lval, exp) ->
                (let (is_decl, vars) = check_vars lval vars in
                   if is_decl then 
-                    let newvar = (self#get_vars exp) in 
-                      decl := newvar@(!decl);
+                    let newvar = (self#get_vars eip exp) in 
+                      List.iter (fun (eip, v) -> Hashtbl.replace !decl v eip) newvar;
                       (true, newvar@vars)
                   else (false, vars)
                )
            | _ -> (false, vars))
       in
-      let rec loop_insn vars l =
+      let rec loop_insn eip vars l =
         (match l with
            | stmt::rest ->
-               (let (in_slice, vars) = stmt_scan vars stmt in
-                let (vars, tail) = loop_insn vars rest in
-                  if in_slice then (vars, stmt::tail)
+               (let (in_slice, vars) = check_stmt eip vars stmt in
+                let (vars, tail) = loop_insn eip vars rest in
+                  if in_slice then (vars, (eip, stmt)::tail)
                   else (vars, tail))
            | [] -> (vars, []))
       in
       let rec loop_prog vars prog = 
         (match prog with
-           | l::rest ->
-               (let (vars, curr) = loop_insn vars (List.rev l) in
+           | (eip, l)::rest ->
+               (let (vars, curr) = loop_insn eip vars (List.rev l) in
                 let (vars', tail) = loop_prog vars rest in
                   (vars', curr @ tail)
                )
@@ -867,15 +917,15 @@ struct
         let (vars, l) = loop_prog vars prog in
           if do_replace then 
             (let l = 
-               (List.map(fun stmt ->
-                           self#replace_temps stmt
-               )l)
+               (List.map (fun (eip, stmt)->
+                            (eip, (self#replace_temps stmt))
+               ) (List.rev l))
              in
-             let decl' = ref [] in 
-               Hashtbl.iter (fun _ v -> decl := V.Temp(v)::(!decl)) slice_var_list; 
-               (!decl@(!decl'), List.rev l))
+               self#find_var_def decl l; 
+               (!decl, List.rev l))
           else
-            (!decl, List.rev l)
+            (self#find_var_def decl (List.rev l);
+             (!decl, List.rev l))
 
     method private print_slice slice =
       Printf.eprintf "Slicing result:\n";
@@ -888,7 +938,7 @@ struct
         | None -> ()
         | Some g ->
             (if not (g#find_slice eip) then
-               (let (decl, slice) = self#prog_slicing (self#get_vars cond) path_cache true
+               (let (decl, slice) = self#prog_slicing (self#get_vars eip cond) path_cache true
                 in
                   (if (List.length slice) = 0 then () 
                    else
@@ -3175,17 +3225,25 @@ struct
 	stmt_num <- -1;
 	loop sl
 
-    method run_slice sl =
-      Hashtbl.iter (fun _ var ->
-                      V.VarHash.replace temps var (D.uninit);
-(*                       Printf.eprintf "run_slice: Add %s to temp list\n" (V.var_to_string var) *)
-      ) slice_var_list;
-      Printf.eprintf "[run_slice] exec slice, len = %d\n" (List.length sl);
-      ignore(self#run_sl is_false sl)
+    method run_slice stmts =
+      Hashtbl.iter 
+        (fun _ var ->
+           V.VarHash.replace temps var (D.uninit)) 
+        slice_var_list;
+      let sl = 
+        List.map (fun (eip, stmt) -> 
+                    stmt)
+          stmts
+      in
+        ignore(self#run_sl is_false sl)
 
     method run () =
       if self#started_symbolic then
-        path_cache <- insns::path_cache;
+        (match (List.nth insns 0) with
+           | V.Label(l) -> 
+               (let eip = (V.label_to_addr l) in 
+                  path_cache <- (eip, insns)::path_cache)
+           | _ -> failwith "Invalid insn: no label");
       self#run_sl is_true insns
 
     method run_to_jump () =
