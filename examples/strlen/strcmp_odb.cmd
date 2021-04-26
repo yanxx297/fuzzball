@@ -1,0 +1,11 @@
+rlwrap ocamldebug ../../exec_utils/fuzzball.dbg \
+-trace-insns -trace-decisions -trace-register-updates -trace-stores -trace-loads \
+-table-limit 10 -trace-tables \
+-trace-temps \
+-save-decision-tree-dot /tmp/strcmp.dot \
+-trace-conditions -trace-iterations \
+-solve-final-pc -trace-assigns \
+-use-loopsum -trace-loopsum \
+-fuzz-start-addr 0x080483f6 -symbolic-string 0x0804a040+64 -symbolic-string 0x0804a080+64 \
+-solver smtlib-batch -solver-path ../../../../z3/build/z3 -save-solver-files -trace-solver \
+-linux-syscalls -trace-stopping strcmp -- ./strcmp 0 2>&1 
