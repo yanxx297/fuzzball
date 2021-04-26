@@ -3,7 +3,9 @@ load_printer ../../ocaml/debug.cmo
 load_printer /export/scratch/yanxx297/.opam/4.05.0/lib/extlib/extLib.cma
 load_printer ../../ocaml/vine_util.cmo
 load_printer ../../ocaml/vine.cmo
-load_printer ../../execution/loopsum_format.cmo
-install_printer Loopsum_format.print_loopbody
-install_printer Loopsum_format.print_eip
-install_printer Loopsum_format.print_expr
+load_printer ../../execution/debug_printer.cmo
+install_printer Debug_printer.print_loopbody
+install_printer Debug_printer.print_eip
+install_printer Debug_printer.print_expr
+install_printer Debug_printer.print_lval
+install_printer Debug_printer.print_decl
