@@ -824,29 +824,50 @@ struct
 
 
     method private find_var_def decl slice =
+      let is_same_temp t1 t2 =
+        (match (t1, t2) with
+           | (V.Temp(_, s1, _), V.Temp(_, s2, _)) ->
+               if ((String.length s1) >= (String.length s2) && String.equal s2 (String.sub s1 0 (String.length s2)))
+                 || ((String.length s2) >= (String.length s1) && String.equal s1 (String.sub s2 0 (String.length s1)))
+               then true
+               else false
+           | _ -> failwith "Not Temp")
+      in
       let rec update_decl eip t stmts =
         (match stmts with
-           | V.Move(V.Temp(v), _)::stmts' ->
+           | V.Move(V.Temp(_) as t', _)::stmts' ->
                (match t with
-                  | V.Temp(_, s, _) ->
-                      let (_, s', _) = v in
-                        if (String.length s) >= (String.length s') &&
-                           String.equal s' (String.sub s 0 (String.length s')) then
-                          Hashtbl.replace !decl t eip
-                        else update_decl eip t stmts'
+                  | V.Temp(_) ->
+                      if (is_same_temp t t') then
+                        (Hashtbl.replace !decl t eip; true)
+                      else update_decl eip t stmts'
                   | _ -> update_decl eip t stmts'
                )
            | _::stmts' -> update_decl eip t stmts'
-           | [] -> ())
+           | [] -> false)
       in
       let rec find_def v l =
         (match l with
-           | (eip, stmts)::l' -> update_decl eip v stmts 
+           | (eip, stmts)::l' -> if not (update_decl eip v stmts) then find_def v l' 
            | [] -> ())
       in
-      let rec find_start eip l =
+      let rec find_start_stmt sl e =
+        (match sl with
+           | stmt::sl' -> 
+               (match stmt with
+                 |  V.Move((V.Temp(_) as t), _) -> 
+                     if (is_same_temp t e) then sl' else find_start_stmt sl' e
+                 | _ -> find_start_stmt sl' e)
+           | [] -> [])
+      in
+      let rec find_start (i: int64) l e =
         (match l with
-           | (e, _)::l' -> if e = eip then l' else find_start eip l'
+           | (eip, sl)::l' -> 
+               if eip = i then 
+                 (let sl' = find_start_stmt sl e in
+                    if sl' = [] then l'
+                    else (eip, sl')::l')
+               else find_start i l' e
            | [] -> [])
       in
       let rec loop eip e =
@@ -856,7 +877,7 @@ struct
            | V.UnOp(op, e1) -> loop eip e1
            | V.FUnOp(op, rm, e1) -> loop eip e1
            | V.Lval((V.Temp(_) as t)) -> 
-               (let l' = find_start eip path_cache in
+               (let l' = find_start eip path_cache t in
                   find_def t l')
            | V.Lval(V.Mem(var, e, typ)) -> loop eip e 
            | V.Cast(ctyp, typ, e1) -> loop eip e1

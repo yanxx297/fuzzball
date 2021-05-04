@@ -726,9 +726,21 @@ class loop_record tail head g= object(self)
       ) l in
       lss <- lss'
 
+  method private slice_to_prog slice =
+    let sl = ref [] in
+    let dl = ref [] in
+    let (decls, stmts) = slice in
+      Hashtbl.iter (fun var _ -> dl := var::!dl) decls;
+      List.iter (fun (_, s) -> sl := s::!sl) stmts;
+      (!dl, !sl)
+
   (* Check function summaries *)
   method private check_func (slice: slice) cond simplify eval_cond =
-    ()
+    let prog = self#slice_to_prog slice in
+    let prog = copy_const_prop prog in
+    let prog = rm_unused_vars prog in
+    let prog = copy_const_prop prog in
+      prog
 
   (* Add or update a guard table entry*)
   method add_g g' check simplify query_unique_value (eval_cond: V.exp -> V.exp) =
@@ -769,7 +781,7 @@ class loop_record tail head g= object(self)
                    match d_opt with
                      | Some d ->
                          (gt <- gt @ [g];
-                           self#check_func slice d0_e simplify eval_cond; 
+                          ignore(self#check_func slice d0_e simplify eval_cond); 
                           match (Hashtbl.find_opt bt eip) with
                             | Some branch -> 
                                 (Hashtbl.remove bt eip;
