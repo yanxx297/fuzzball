@@ -562,10 +562,6 @@ class loop_record tail head g= object(self)
               | None -> failwith "No dD") in
          let d_cond = V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), d) in
          let dd_cond = V.BinOp(V.SLT, V.Constant(V.Int(ty, 0L)), dd) in
-           Printf.eprintf "[check_loopsum][compute_ec] D = %s\n" (V.exp_to_string d);
-           Printf.eprintf "[check_loopsum][compute_ec] dD = %s\n" (V.exp_to_string dd);
-           Printf.eprintf "[check_loopsum][compute_ec] D cond = %s\n" (V.exp_to_string (simplify V.REG_1 d_cond));
-           Printf.eprintf "[check_loopsum][compute_ec] dD cond = %s\n" (V.exp_to_string (simplify V.REG_1 dd_cond));
            (match op with
               | V.SLE | V.SLT ->
                   if check (V.BinOp(V.XOR, d_cond, dd_cond)) then
@@ -609,7 +605,6 @@ class loop_record tail head g= object(self)
                              V.Constant(V.Int(ty, 0L)))
                    in
                    let no_iof = V.BinOp(V.XOR, d_cond, dd_cond) in
-                     Printf.eprintf "[check_loopsum][compute_ec] reachable = %s\n" (V.exp_to_string (simplify V.REG_1 reachable));
                      match (check no_iof, check reachable) with
                        | (true, true) ->
                            Some 
@@ -653,9 +648,7 @@ class loop_record tail head g= object(self)
                                self#ec (op, ty, d, V.UnOp(V.NEG, dd)))
  *)
               | _ -> failwith "invalid guard operation"))
-    | _ -> 
-        (Printf.eprintf "[check_loopsum]Unable to split %s\n" (V.exp_to_string e);
-         raise Not_found)
+    | _ -> raise Not_found
 
   (* Given lhs, rhs and op, compute a distance (D)*)
   (* loop_cond := if true, stay in the loop*) 
@@ -745,8 +738,6 @@ class loop_record tail head g= object(self)
   (* Add or update a guard table entry*)
   method add_g g' check simplify query_unique_value (eval_cond: V.exp -> V.exp) =
     let (eip, op, ty, d0_e, slice, (slice_g: slice), lhs, rhs, b, eeip) = g' in
-      if eip = 0x8048420L then 
-        ();
       if !opt_trace_loopsum_detailed then
         Printf.eprintf "At iter %d, check cjmp at %08Lx, op = %s\n" iter eip (V.binop_to_string op);
       (match self#is_known_guard eip gt with
@@ -900,9 +891,7 @@ class loop_record tail head g= object(self)
           Printf.eprintf "lss already exist, ignore\n"
         else
           lss <- lss @ [(ivt, gt, Hashtbl.copy bdt, geip)];
-        Printf.eprintf "[loopsum] new at loop iter %d\n" (self#get_iter);
         self#print_lss [(ivt, gt, Hashtbl.copy bdt, geip)];
-        Printf.eprintf "[loopsum] current lss, length =  %d\n" (List.length lss);
         self#print_lss lss
 
   method private compute_precond loopsum check eval_cond simplify unwrap_temp 
@@ -996,18 +985,14 @@ class loop_record tail head g= object(self)
     let get_feasible l =
       let feasibles = ref [] in
       let rec check_node id l conds = 
-        Printf.eprintf "[check_loopsum]conds[%d]:%s\n" id (V.exp_to_string (simplify V.REG_1 conds));
         (match l with
            | h::rest ->
                (let (ivt, gt, bdt, geip) = h in
                 let precond = self#compute_precond h check eval_cond simplify unwrap_temp 
                                 query_unique_value run_slice in
-                  Printf.eprintf "[check_loopsum]Precond[%d]: %s\n" id (V.exp_to_string (simplify V.REG_1 precond));
                   if check (V.BinOp(V.BITAND, precond, conds)) then
-                    (Printf.eprintf "[check_loopsum]lss[%d] is feasible\n" id;
-                     feasibles := (V.BinOp(V.BITAND, precond, conds), 
-                                   id, ivt, gt, bdt, geip)::!feasibles)
-                  else Printf.eprintf "[check_loopsum]lss[%d] is infeasible\n" id;
+                    feasibles := (V.BinOp(V.BITAND, precond, conds), 
+                                  id, ivt, gt, bdt, geip)::!feasibles;
                   check_node (id+1) rest (V.BinOp(V.BITAND, conds, V.UnOp(V.NOT, precond))))
            | [] -> ())
       in
@@ -1017,16 +1002,14 @@ class loop_record tail head g= object(self)
     let rec get_precond l cur =
       match l with
         | h::rest -> 
-            (Printf.eprintf "[check_loopsum] node %d is_all_seen = %B\n" (get_t_child cur) (is_all_seen (get_t_child cur));
-              if cur = -1 || not (is_all_seen (get_t_child cur)) then
+            (if cur = -1 || not (is_all_seen (get_t_child cur)) then
                let (_, _, ivt, gt, bdt, geip) = h in
                let loopsum = (ivt, gt, bdt, geip) in
                let precond = self#compute_precond loopsum check eval_cond simplify 
                                unwrap_temp query_unique_value run_slice in
                  V.BinOp(V.BITOR, precond, (get_precond rest (get_f_child cur)))
-             else 
-               get_precond rest (get_f_child cur)
-            ) 
+                 else 
+                   get_precond rest (get_f_child cur))
         | [] -> V.Constant(V.Int(V.REG_1, 0L))
     in
     let use_loopsum l =
@@ -1039,15 +1022,14 @@ class loop_record tail head g= object(self)
        in
        let b = check cond in
          (* TODO: enable random decision and add cond to PC (only when no loopsum?) *)
-         Printf.eprintf "[check_loopsum]precond: %s\n" (V.exp_to_string cond);
          if b then 
            (let b =  try_ext trans_func try_func non_try_func true_bit both_fail_func 0x0 in
               if not b then failwith "Inconsist try_extend result: true -> false\n";
-              Printf.eprintf "[check_loopsum]Decide to use loopsum (%B)\n" b)
+              Printf.eprintf "Decide to use loopsum (%B)\n" b)
          else 
            (let b = try_ext trans_func try_func non_try_func false_bit both_fail_func 0x0 in
               if b then failwith "Inconsist try_extend result: false -> true\n";
-              Printf.eprintf "[check_loopsum]Decide not to use loopsum (%B)\n" b);
+              Printf.eprintf "Decide not to use loopsum (%B)\n" b);
          b)
     in
     let compute_iv_update loopsum = 
@@ -1076,7 +1058,6 @@ class loop_record tail head g= object(self)
                  (vt, slice_g, eeip))
     in
     let extend_with_loopsum_dry l id cur =
-      Printf.eprintf "[check_loopsum]Check whether %d(parent %d) is all_seen\n" (get_t_child cur) cur;
       let rec extend l level cur =
         if cur = -1 then true
         else
@@ -1095,10 +1076,8 @@ class loop_record tail head g= object(self)
     let choose_loopsum feasibles =
       let all = List.length feasibles in
       let n = ref (Random.int all) in
-        Printf.eprintf "[check_loopsum]feasible lss = %d\n" all;
         if all <= 0 then failwith "Inconsistency between use_loopsum and choose_loopsum\n";
         while not (extend_with_loopsum_dry feasibles (!n+1) (get_t_child cur_ident)) do
-          Printf.eprintf "[check_loopsum]\tRand = %d\n" !n;
           n := Random.int all
         done;
         let (loopsum_cond, id, ivt, gt, _, geip) = (List.nth feasibles !n) in
@@ -1123,21 +1102,20 @@ class loop_record tail head g= object(self)
       in
         extend l 1
     in
-      Printf.eprintf "[check_loopsum]Start to check loopsum\n";
-      if (self#get_iter <= 2) then (Printf.eprintf "[check_loopsum] iter = %d, quit\n" self#get_iter; ([], [], 0L))
+      if (self#get_iter <= 2) then ([], [], 0L)
       else
         (match loopsum_status with
            (*NOTE: should also extend useLoopsum node for Some ture/false status? *)
            | Some true -> 
-               Printf.eprintf "[check_loopsum]Loopsum has been applied in 0x%Lx\n" eip; ([], [], 0L)
+               Printf.eprintf "Loopsum has been applied in 0x%Lx\n" eip; ([], [], 0L)
            | Some false -> 
-               Printf.eprintf "[check_loopsum]Loop has been checked but no loopsum applies in 0x%Lx\n" eip; ([], [], 0L)
+               Printf.eprintf "Loop has been checked but no loopsum applies in 0x%Lx\n" eip; ([], [], 0L)
            | None -> 
                (let feasibles = get_feasible lss in
                   if use_loopsum feasibles then
                     (loopsum_status <- Some true;
                      let (n, id, vt, slice_g, eeip) =  choose_loopsum feasibles in
-                       Printf.eprintf "[check_loopsum]Choose loopsum[%d]\n" id;
+                       Printf.eprintf "Choose loopsum[%d]\n" id;
                        extend_with_loopsum feasibles (n+1);
                        (vt, slice_g, eeip))
                   else 
@@ -1150,7 +1128,6 @@ class loop_record tail head g= object(self)
 
   method reset =
     iter <- 0;
-    Printf.eprintf "[reset] reset iter to 0\n";
     loopsum_status <- None;
     ivt <- [];
     ivt_reg <- [];
@@ -1159,13 +1136,11 @@ class loop_record tail head g= object(self)
   method make_snap =
     snap_bdt <- bdt;    
     iter_snap <- iter;
-    Printf.eprintf "[make_snap] save iter %d\n" iter;
     loopsum_status_snap <- loopsum_status
 
   method reset_snap =
     bdt <- snap_bdt;
     iter <- iter_snap;
-    Printf.eprintf "[reset_snap] reset iter %d\n" iter;
     loopsum_status <- loopsum_status_snap
 
   initializer 
@@ -1351,13 +1326,7 @@ class dynamic_cfg (eip : int64) = object(self)
         | None -> false
         | Some l -> l#in_loop eip
 
-  method is_loop_head e = 
-    let res = (Hashtbl.mem looplist (last_eip, e)) in
-      if res then
-        Printf.eprintf "[is_loop_head] (0x%Lx, 0x%Lx) is loop head\n" last_eip e
-      else 
-        Printf.eprintf "[is_loop_head] (0x%Lx, 0x%Lx) is NOT loop head\n" last_eip e;
-      res
+  method is_loop_head e = Hashtbl.mem looplist (last_eip, e)
 
   method check_loopsum eip check add_pc simplify load_iv eval_cond unwrap_temp
                               try_ext random_bit is_all_seen query_unique_value
@@ -1376,7 +1345,7 @@ class dynamic_cfg (eip : int64) = object(self)
                  try_ext random_bit is_all_seen query_unique_value
                  cur_ident get_t_child get_f_child add_node run_slice)
         | None -> 
-            Printf.eprintf "[check_loopsum] not currently in a loop\n";
+            Printf.eprintf "not currently in a loop\n";
 (*             ignore(try_ext trans_func try_func non_try_func (fun() -> false) both_fail_func 0xffff); *)
             ([], [], 0L)
 
@@ -1441,18 +1410,15 @@ class dynamic_cfg (eip : int64) = object(self)
       Printf.eprintf "Current dcfg (0x%08Lx) have %d loops in active\n" head count
 
   method reset = 
-    if !opt_trace_loopsum_detailed then
-      Printf.eprintf "[reset]Reset dcfg starts with %Lx\n" head;
     g#reset; 
     current_node <- -1L;
     last_eip <- -1L;
 
   method make_snap =
     if !opt_trace_loopsum && ((Hashtbl.length looplist) > 0) then
-      Printf.eprintf "[make_snap] dcfg starts with %Lx, looplist[%d]\n" head (Hashtbl.length looplist);
+      Printf.eprintf "dcfg starts with %Lx, looplist[%d]\n" head (Hashtbl.length looplist);
     g#make_snap;
     Hashtbl.iter (fun (t, h) l -> 
-                    Printf.eprintf "[make_snap] snap loop (%Lx, %Lx)\n" t h; 
                     l#make_snap) looplist;
     current_node_snap <- current_node;
     last_eip_snap <- last_eip;
@@ -1460,12 +1426,11 @@ class dynamic_cfg (eip : int64) = object(self)
 
   method reset_snap =
     if !opt_trace_loopsum && ((Hashtbl.length looplist) > 0) then
-      Printf.eprintf "[reset_snap] dcfg starts with %Lx, looplist[%d]\n" head (Hashtbl.length looplist);
+      Printf.eprintf "dcfg starts with %Lx, looplist[%d]\n" head (Hashtbl.length looplist);
     g#reset_snap;
     current_node <- current_node_snap;
     last_eip <- last_eip_snap;
     loopstack <- Stack.copy loopstack_snap;
     Hashtbl.iter (fun (t, h) l ->
-                    Printf.eprintf "[reset_snap] snap loop (%Lx, %Lx)\n" t h; 
                     l#reset_snap) looplist;
 end

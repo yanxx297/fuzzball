@@ -989,7 +989,7 @@ struct
                                         try_ext random_bit is_all_seen query_unique_value
                                         cur_ident get_t_child get_f_child = 
       match current_dcfg with
-        | None -> (Printf.eprintf "[check_loopsum] not currently in a dcfg, skip\n"; ([], [], 0L))
+        | None -> ([], [], 0L)
         | Some dcfg -> 
             dcfg#check_loopsum eip check add_pc simplify eval_int eval_cond unwrap_temp 
               try_ext random_bit is_all_seen query_unique_value
