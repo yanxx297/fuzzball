@@ -20,6 +20,8 @@ type stmts = (int64 * Vine.stmt) list
 type decls = (Vine.var, int64) Hashtbl.t 
 type slice = decls * stmts 
 
+type func_model = STRLEN | STRCMP
+
 (* Split a jmp condition to (lhs, rhs, op)*)
 (* b := the in loop side of the cjmp (true/false) *)
 (* TODO: add support to more operations*)
@@ -727,13 +729,51 @@ class loop_record tail head g= object(self)
       List.iter (fun (_, s) -> sl := s::!sl) stmts;
       (!dl, !sl)
 
+  method private find_reg_iv exp decl =
+    let rec loop t eip_def =
+      (match t with
+         | ((eip, reg, _, _, _, _) as iv)::t' -> 
+             (if (eip = eip_def) && (exp = reg) then Some iv else loop t' eip_def)
+         | [] -> None)
+    in
+      match (Hashtbl.find_opt decl exp) with
+        | Some eip_def -> loop ivt_reg eip_def
+        | None -> None 
+
+  method private is_strlen sl decl =
+    let rec loop exp =
+      (match exp with
+         | V.Cast(_, _, e) -> loop e
+         | V.Lval(V.Mem (_, V.Lval(V.Temp(v)), V.REG_8)) -> Some v
+         | _ -> None) 
+    in
+    let check stmt =
+      match stmt with
+        | V.Move(V.Temp(_, s, _), V.BinOp(V.EQ, exp, V.Constant(V.Int(_, 0L)))) ->
+            (if (String.length s < 4) || not (String.equal "R_ZF" (String.sub s 0 4)) then None 
+             else 
+               match (loop exp) with 
+                 | Some e -> 
+                     (match (self#find_reg_iv e decl) with
+                        | Some ((_, _, _, _, _, Some (V.Constant(V.Int(_, 1L))) as iv)) -> Some iv
+                        | _ -> None)
+                 | None -> None)
+        | _ -> None
+    in
+    if not (List.length sl = 1) then failwith "Slice simplify failed";
+    let stmt = List.nth sl 0 in
+      check stmt
+
   (* Check function summaries *)
   method private check_func (slice: slice) cond simplify eval_cond =
     let prog = self#slice_to_prog slice in
-    let prog = copy_const_prop prog in
-    let prog = rm_unused_vars prog in
-    let prog = copy_const_prop prog in
-      prog
+    let prog = simplify_slice prog in
+    let (_, sl) = prog in
+    let (decl, _) = slice in
+      match (self#is_strlen sl decl) with
+        | Some iv -> 
+            (ignore(iv))
+        | None -> ()
 
   (* Add or update a guard table entry*)
   method add_g g' check simplify query_unique_value (eval_cond: V.exp -> V.exp) =
@@ -744,6 +784,7 @@ class loop_record tail head g= object(self)
          | Some g -> 
              (let (_, _, _, _, _, _, d_opt, dd_opt, _, _) = g in
               let d_opt' = self#compute_distance op ty lhs rhs check simplify in
+                self#check_func slice d0_e simplify eval_cond; 
                 (match (d_opt, d_opt', dd_opt) with
                    | (Some d, Some d', None) ->
                        (let dd' = V.BinOp(V.MINUS, d', d) in
@@ -772,7 +813,7 @@ class loop_record tail head g= object(self)
                    match d_opt with
                      | Some d ->
                          (gt <- gt @ [g];
-                          ignore(self#check_func slice d0_e simplify eval_cond); 
+                          self#check_func slice d0_e simplify eval_cond; 
                           match (Hashtbl.find_opt bt eip) with
                             | Some branch -> 
                                 (Hashtbl.remove bt eip;

@@ -899,3 +899,11 @@ let simplify_frag (orig_dl, orig_sl) =
        V.pp_program print_string (dl', sl');
        V.pp_program print_string (copy_prop (dl', sl')); *)
     (dl', sl')
+
+let simplify_slice (orig_dl, orig_sl) =
+  let (dl, sl) = copy_const_prop (orig_dl, orig_sl) in
+  let (dl, sl) = rm_unused_vars (dl, sl) in
+  let (dl, sl) = copy_const_prop (dl, sl) in
+  let (dl, sl) = cfold_exprs (dl, sl) in
+    (dl, sl)
+
