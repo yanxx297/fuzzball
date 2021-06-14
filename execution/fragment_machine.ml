@@ -554,7 +554,6 @@ class virtual fragment_machine = object
   method virtual add_iv : int64 -> Vine.exp -> unit
   method virtual add_iv_reg : int64 -> Vine.var -> Vine.exp -> unit
   method virtual update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
-  method virtual update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method virtual print_dt : unit
   method virtual add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
       (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> 
@@ -721,11 +720,6 @@ struct
       match current_dcfg with
         | None -> ()
         | Some g -> g#update_ivt simplify check
-
-    method update_ivt_reg simplify check = 
-      match current_dcfg with
-        | None -> ()
-        | Some g -> g#update_ivt_reg simplify check
 
     method is_iv_cond cond = 
       match current_dcfg with

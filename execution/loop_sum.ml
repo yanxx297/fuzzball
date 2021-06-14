@@ -20,6 +20,11 @@ type stmts = (int64 * Vine.stmt) list
 type decls = (Vine.var, int64) Hashtbl.t 
 type slice = decls * stmts 
 
+type iv = 
+  | Mem of int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option
+  | Reg of int64 * Vine.var * Vine.exp * Vine.exp * Vine.exp * Vine.exp option
+type guard = int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option * Vine.exp option * bool * int64
+
 type func_model = STRLEN | STRCMP
 
 (* Split a jmp condition to (lhs, rhs, op)*)
@@ -302,7 +307,7 @@ class loop_record tail head g= object(self)
 
   method get_lss = lss
 
-  method set_lss s = lss <- s
+  method set_lss (s: (iv list * guard list * (int64, bool) Hashtbl.t * int64) list) = lss <- s
 
   (* List of in-loop branch conditions and the associated prog slices *)
   (* This list is shared among all summaries in the same lss*)
@@ -371,21 +376,23 @@ class loop_record tail head g= object(self)
   (* offset:= addr offset from stack pointer *)
   (* NOTE: add ty to this table instead of intering it on demand?*)
   val mutable ivt = []
-  val mutable ivt_reg = []
   val iv_cond_t = Hashtbl.create 10
 
   (* Return true if ivt and ivt' are identical *)
   (* For the IVTs of the same loopsum, there should be exactly the same number*)
   (* of IVs, added in exactly the same order*)
-  method private ivt_cmp ivt ivt' =
+  method private ivt_cmp ivt (ivt': iv list) =
     if not (List.length ivt = List.length ivt') then false
     else
       let res = ref true in
-        List.iteri (fun i iv ->
-                      let (off, _, _, _, dv) = iv
-                      and (off', _, _, _, dv') = List.nth ivt' i in
-                        if not (off = off' && dv = dv') then res := false
-        ) ivt;
+        List.iter2 (fun iv iv' ->
+                      match (iv, iv') with
+                        | (Mem(off, _, _, _, dv), Mem(off', _, _, _, dv')) ->
+                            if not (off = off' && dv = dv') then res := false
+                        | (Reg(eip, reg, _, _, _, _), Reg(eip', reg', _, _, _, _)) ->
+                            if not (eip = eip' && reg = reg') then res := false
+                        | _ -> res := false
+        ) ivt ivt';
         !res
 
   method is_iv_cond cond = 
@@ -426,37 +433,30 @@ class loop_record tail head g= object(self)
   method update_ivt simplify check =
     let rec loop ivt = 
       match ivt with 
-        | iv::l ->            
-            let (off, v0, v, v', dv_opt) = iv in              
-            let dv' = self#simplify_typecheck simplify (V.BinOp(V.MINUS, v', v)) in
-              if iter = 2 then (off, v0, v', v', dv_opt)::(loop l)
-              else if iter = 3 then 
-                (off, self#simplify_typecheck simplify (V.BinOp(V.MINUS, v0, dv')), v', v', Some dv')::(loop l) 
-              else (match (self#check_iv simplify check v v' dv_opt) with
-                      | Some dv' -> (off, v0, v', v', Some dv')::(loop l)
-                      | None -> (loop l))
+        | iv::l ->
+            (match iv with
+               | Mem(off, v0, v, v', dv_opt) ->
+                   let dv' = self#simplify_typecheck simplify (V.BinOp(V.MINUS, v', v)) in
+                     if iter = 2 then Mem(off, v0, v', v', dv_opt)::(loop l)
+                     else if iter = 3 then 
+                       Mem(off, self#simplify_typecheck simplify (V.BinOp(V.MINUS, v0, dv')), v', v', Some dv')::(loop l) 
+                     else (match (self#check_iv simplify check v v' dv_opt) with
+                             | Some dv' -> Mem(off, v0, v', v', Some dv')::(loop l)
+                             | None -> (loop l))
+               | Reg(eip, reg, v0, v, v', dv_opt) ->
+                   let dv' = self#simplify_typecheck simplify (V.BinOp(V.MINUS, v', v)) in
+                     if iter = 2 then Reg(eip, reg, v0, v', v', dv_opt)::(loop l)
+                     else if iter = 3 then 
+                       Reg(eip, reg, self#simplify_typecheck simplify (V.BinOp(V.MINUS, v0, dv')), v', v', Some dv')::(loop l) 
+                     else (match (self#check_iv simplify check v v' dv_opt) with
+                             | Some dv' -> Reg(eip, reg, v0, v', v', Some dv')::(loop l)
+                             | None -> (loop l)))
         | [] -> []
     in
     let ivt' = loop ivt in
-      if (List.length ivt') < (List.length ivt) then ivt <- []
+      if (List.length ivt') < (List.length ivt) then 
+        ivt <- []
       else ivt <- ivt'
-
-  method update_ivt_reg simplify check =
-    let rec loop ivt = 
-      match ivt with 
-        | iv::l ->            
-            let (eip, reg, v0, v, v', dv_opt) = iv in              
-            let dv' = self#simplify_typecheck simplify (V.BinOp(V.MINUS, v', v)) in
-              if iter = 2 then (eip, reg, v0, v', v', dv_opt)::(loop l)
-              else if iter = 3 then 
-                (eip, reg, self#simplify_typecheck simplify (V.BinOp(V.MINUS, v0, dv')), v', v', Some dv')::(loop l) 
-              else (match (self#check_iv simplify check v v' dv_opt) with
-                      | Some dv' -> (eip, reg, v0, v', v', Some dv')::(loop l)
-                      | None -> (loop l))
-        | [] -> []
-    in
-    let ivt_reg' = loop ivt_reg in
-      ivt_reg <- ivt_reg'
 
   method get_ivt = ivt
 
@@ -471,28 +471,29 @@ class loop_record tail head g= object(self)
   method add_iv (offset: int64) (exp: V.exp) =
     let rec loop ivt =
       match ivt with
-        | iv::l ->
-            let (off, v0, v, v', dv) = iv in
-              if off = offset && not (v' = exp) then [(off, v0, v, exp, dv)] @ l
-              else [iv] @ (loop l)
+        | (Mem(off, v0, v, v', dv) as iv)::l ->
+            if off = offset && not (v' = exp) then [Mem(off, v0, v, exp, dv)] @ (loop l)
+            else [iv] @ (loop l)
+        | iv::l -> [iv] @ (loop l)
         | [] -> 
-            if iter = 2 then [(offset, exp, exp, exp, None)]
+            if iter = 2 then [Mem(offset, exp, exp, exp, None)]
             else []
     in
-      ivt <- loop ivt
+      ivt <- loop ivt;
+      ()
 
   method add_iv_reg (eip: int64) (reg: V.var) (exp: V.exp) =  
     let rec loop ivt =
       match ivt with
-        | iv::l ->
-            let (e, r, v0, v, v', dv) = iv in
-              if e = eip && r = reg && not (v' = exp) then [(e, r, v0, v, exp, dv)] @ l
-              else [iv] @ (loop l)
+        | (Reg(e, r, v0, v, v', dv) as iv)::l ->
+            if e = eip && r = reg && not (v' = exp) then [Reg(e, r, v0, v, exp, dv)] @ (loop l)
+            else [iv] @ (loop l)
+        | iv::l -> [iv] @ (loop l)
         | [] -> 
-            if iter = 2 then [(eip, reg, exp, exp, exp, None)]
+            if iter = 2 then [Reg(eip, reg, exp, exp, exp, None)]
             else []
     in
-      ivt_reg <- loop ivt_reg
+      ivt <- loop ivt
 
   (*Guard table: (eip, op, ty, D0_e, slice, slice_g, D, dD, b, exit_eip)*)
   (*D0_e: the code exp of the jump condition's location*)
@@ -732,12 +733,15 @@ class loop_record tail head g= object(self)
   method private find_reg_iv exp decl =
     let rec loop t eip_def =
       (match t with
-         | ((eip, reg, _, _, _, _) as iv)::t' -> 
-             (if (eip = eip_def) && (exp = reg) then Some iv else loop t' eip_def)
+         | iv::t' ->
+             (match iv with
+                | Reg(eip, reg, _, _, _, _) ->
+                    if (eip = eip_def) && (exp = reg) then Some iv else loop t' eip_def
+                | Mem(_, _, _, _, _) -> loop t' eip_def)
          | [] -> None)
     in
       match (Hashtbl.find_opt decl exp) with
-        | Some eip_def -> loop ivt_reg eip_def
+        | Some eip_def -> loop ivt eip_def
         | None -> None 
 
   method private is_strlen sl decl =
@@ -755,7 +759,7 @@ class loop_record tail head g= object(self)
                match (loop exp) with 
                  | Some e -> 
                      (match (self#find_reg_iv e decl) with
-                        | Some ((_, _, _, _, _, Some (V.Constant(V.Int(_, 1L))) as iv)) -> Some iv
+                        | Some (Reg(_, _, _, _, _, Some (V.Constant(V.Int(_, 1L)))) as iv) -> Some iv
                         | _ -> None)
                  | None -> None)
         | _ -> None
@@ -765,7 +769,7 @@ class loop_record tail head g= object(self)
       check stmt
 
   (* Check function summaries *)
-  method private check_func (slice: slice) cond simplify eval_cond =
+  method private check_func (slice: slice) =
     let prog = self#slice_to_prog slice in
     let prog = simplify_slice prog in
     let (_, sl) = prog in
@@ -784,7 +788,7 @@ class loop_record tail head g= object(self)
          | Some g -> 
              (let (_, _, _, _, _, _, d_opt, dd_opt, _, _) = g in
               let d_opt' = self#compute_distance op ty lhs rhs check simplify in
-                self#check_func slice d0_e simplify eval_cond; 
+                self#check_func slice; 
                 (match (d_opt, d_opt', dd_opt) with
                    | (Some d, Some d', None) ->
                        (let dd' = V.BinOp(V.MINUS, d', d) in
@@ -813,7 +817,7 @@ class loop_record tail head g= object(self)
                    match d_opt with
                      | Some d ->
                          (gt <- gt @ [g];
-                          self#check_func slice d0_e simplify eval_cond; 
+                          self#check_func slice; 
                           match (Hashtbl.find_opt bt eip) with
                             | Some branch -> 
                                 (Hashtbl.remove bt eip;
@@ -835,17 +839,17 @@ class loop_record tail head g= object(self)
         | Some d -> Printf.eprintf "\t(+ %s)\n" (V.exp_to_string d)
         | None -> Printf.eprintf "\t [dV N/A]\n"
     in
-      Printf.eprintf "* Inductive Variables Table [%d]\n" ((List.length ivt) + (List.length ivt_reg));
-      List.iteri (fun i (offset, v0, v, v', dv) ->
-                    Printf.eprintf "[%d]\tmem[sp+%Lx] = %s " i offset (V.exp_to_string v0);
-                    print_dv dv
+      Printf.eprintf "* Inductive Variables Table [%d]\n" (List.length ivt);
+      List.iteri (fun i iv ->
+                    (match iv with
+                       | Mem(offset, v0, v, v', dv) -> 
+                           (Printf.eprintf "[%d]\tmem[sp+%Lx] = %s " i offset (V.exp_to_string v0);
+                            print_dv dv)
+                       | Reg(eip, reg, v0, v, v', dv) ->
+                           (let (_, s, _) = reg in
+                             Printf.eprintf "[%d]\t0x%Lx %s = %s " i eip s (V.exp_to_string v0);
+                             print_dv dv))
       ) ivt;
-      List.iteri (fun i (eip, reg, v0, v, v', dv) ->
-                    let (_, s, _) = reg in
-                      Printf.eprintf "[%d]\t0x%Lx %s = %s " i eip s (V.exp_to_string v0);
-                      print_dv dv
-      ) ivt_reg
-
 
   method private print_gt gt =
     Printf.eprintf "* Guard Table [%d]\n" (List.length gt);
@@ -917,8 +921,9 @@ class loop_record tail head g= object(self)
       let iv_all_valid = ref true in
       let g_all_valid = ref true in
         List.iter (fun iv ->
-                     let (_, _, _, _, dv) = iv in
-                       if dv = None then iv_all_valid := false 
+                     match iv with
+                       | Mem(_, _, _, _, dv) | Reg(_, _, _, _, _, dv) ->
+                           if dv = None then iv_all_valid := false
         ) ivt;
         List.iter (fun g ->
                      let (_, _, _, _, _ ,_ , _, dd, _, _) = g in
@@ -1010,6 +1015,34 @@ class loop_record tail head g= object(self)
            ) loop_body;
            Printf.eprintf "{%s}\n" !msg)
 
+  method private compute_iv_update loopsum load_iv simplify check eval_cond unwrap_temp 
+          query_unique_value run_slice = 
+    let (ivt, gt, geip) = loopsum in
+    let g_opt = self#is_known_guard geip gt in
+    let rec loop t ec =
+      (match t with
+        | Mem(offset, v, _, _, dv_opt)::t' -> 
+            (let ty = Vine_typecheck.infer_type_fast v in
+             let v0 = load_iv offset ty in
+               match dv_opt with
+                 | Some dv -> 
+                     (offset, simplify ty (V.BinOp(V.PLUS, v0, V.BinOp(V.TIMES, ec, dv))))::(loop t' ec)
+                 | None -> failwith "")
+         | _::t' -> loop t' ec
+         | [] -> []) 
+    in
+      match g_opt with
+        | None -> failwith ""
+        | Some g ->
+            (let (_, _, _, _, _, (_, slice_g),  _, _, _, eeip) = g in
+             let ec_opt = self#compute_ec g check eval_cond simplify unwrap_temp 
+                            query_unique_value run_slice in 
+             let vt = (match ec_opt with
+                         | Some ec -> loop ivt ec
+                         | None -> [])
+             in
+               (vt, slice_g, eeip))
+
   (* Check whether any existing loop summarization that can fit current
    condition and return the updated values and addrs of IVs.
    NOTE: the update itself implemented in sym_region_frag_machine.ml*)
@@ -1073,31 +1106,6 @@ class loop_record tail head g= object(self)
               Printf.eprintf "Decide not to use loopsum (%B)\n" b);
          b)
     in
-    let compute_iv_update loopsum = 
-      let (ivt, gt, geip) = loopsum in
-      let g_opt = self#is_known_guard geip gt in
-        match g_opt with
-          | None -> failwith ""
-          | Some g ->
-              (let (_, _, _, _, _, (_, slice_g),  _, _, _, eeip) = g in
-               let ec_opt = self#compute_ec g check eval_cond simplify unwrap_temp 
-                              query_unique_value run_slice in 
-               let vt = 
-                 (match ec_opt with
-                    | Some ec ->
-                        (List.map 
-                           (fun (offset, v, _, _, dv_opt) ->
-                              let ty = Vine_typecheck.infer_type_fast v in
-                              let v0 = load_iv offset ty in
-                                match dv_opt with
-                                  | Some dv -> 
-                                      (offset, simplify ty (V.BinOp(V.PLUS, v0, V.BinOp(V.TIMES, ec, dv))))
-                                  | None -> failwith ""
-                           ) ivt) 
-                    | None -> [])
-               in
-                 (vt, slice_g, eeip))
-    in
     let extend_with_loopsum_dry l id cur =
       let rec extend l level cur =
         if cur = -1 then true
@@ -1122,7 +1130,10 @@ class loop_record tail head g= object(self)
           n := Random.int all
         done;
         let (loopsum_cond, id, ivt, gt, _, geip) = (List.nth feasibles !n) in
-        let (vt, slice_g, eeip) = compute_iv_update (ivt, gt, geip) in
+        let (vt, slice_g, eeip) = 
+          self#compute_iv_update (ivt, gt, geip) load_iv simplify check eval_cond unwrap_temp 
+            query_unique_value run_slice 
+        in
           (!n, id, vt, slice_g, eeip)
     in
     (*TODO: modify this method so that try_ext code = lss id*)
@@ -1153,7 +1164,15 @@ class loop_record tail head g= object(self)
                Printf.eprintf "Loop has been checked but no loopsum applies in 0x%Lx\n" eip; ([], [], 0L)
            | None -> 
                (let feasibles = get_feasible lss in
-                  if use_loopsum feasibles then
+                  (*
+                  if feasibles = [] then
+                    (List.iter (fun (ivt, gt, _, _) ->
+                                  List.iter () gt
+                    ) lss;
+                      ([], [], 0L))
+                  else 
+                   *)
+                    if use_loopsum feasibles then
                     (loopsum_status <- Some true;
                      let (n, id, vt, slice_g, eeip) =  choose_loopsum feasibles in
                        Printf.eprintf "Choose loopsum[%d]\n" id;
@@ -1171,7 +1190,6 @@ class loop_record tail head g= object(self)
     iter <- 0;
     loopsum_status <- None;
     ivt <- [];
-    ivt_reg <- [];
     gt <- [];
 
   method make_snap =
@@ -1253,12 +1271,6 @@ class dynamic_cfg (eip : int64) = object(self)
       match loop with
         | None -> ()
         | Some l -> l#update_ivt simplify check
-
-  method update_ivt_reg simplify check = 
-    let loop = self#get_current_loop in
-      match loop with
-        | None -> ()
-        | Some l -> l#update_ivt_reg simplify check
 
   method add_iv addr exp =
     let loop = self#get_current_loop in

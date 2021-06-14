@@ -2,6 +2,12 @@ type stmts = (int64 * Vine.stmt) list
 type decls = (Vine.var, int64) Hashtbl.t 
 type slice = decls * stmts 
 
+type iv = 
+  | Mem of int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option
+  | Reg of int64 * Vine.var * Vine.exp * Vine.exp * Vine.exp * Vine.exp option
+
+type guard = int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option * Vine.exp option * bool * int64
+
 val split_cond : Vine.exp -> bool ->
   (Vine.var -> Vine.exp option) ->
   Vine.exp option * Vine.exp option * Vine.binop_type
@@ -27,27 +33,15 @@ class loop_record : int64 -> int64 -> simple_graph -> object
   method reset : unit
   method make_snap : unit
   method reset_snap : unit
-  method get_ivt : (int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option) list
+  method get_ivt : iv list
   method update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
-  method update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method is_iv_cond : Vine.exp -> bool
-  method is_known_guard : int64 ->
-    (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
-     Vine.exp option * bool * int64) list ->
-    (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
-     Vine.exp option * bool * int64) option
+  method is_known_guard : int64 -> guard list -> guard option
   method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp * Vine.exp * bool * int64 ->
     (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> (Vine.exp -> Vine.exp) -> unit
-  method get_gt : (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
-                   Vine.exp option * bool * int64) list                                                                  
-  method get_lss: ((int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option) list *
-                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
-                    Vine.exp option * bool * int64)
-                     list * (int64, bool) Hashtbl.t * int64) list                                                                  
-  method set_lss: ((int64 * Vine.exp * Vine.exp * Vine.exp * Vine.exp option) list *
-                   (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
-                    Vine.exp option * bool * int64)
-                     list * (int64, bool) Hashtbl.t * int64) list -> unit
+  method get_gt : guard list 
+  method get_lss: (iv list * guard list * (int64, bool) Hashtbl.t * int64) list                                                                  
+  method set_lss: (iv list * guard list * (int64, bool) Hashtbl.t * int64) list -> unit
   method save_lss : int64 -> unit
   method add_insn : int64 -> unit
   method add_bd : int64 -> bool -> unit
@@ -87,11 +81,8 @@ class dynamic_cfg : int64 -> object
   method add_iv : int64 -> Vine.exp -> unit
   method add_iv_reg : int64 -> Vine.var -> Vine.exp -> unit
   method update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
-  method update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
   method is_iv_cond : Vine.exp -> bool
-  method is_known_guard : int64 ->
-    (int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp option *
-     Vine.exp option * bool * int64) option
+  method is_known_guard : int64 -> guard option
   method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * slice * slice * Vine.exp * Vine.exp * bool * int64 ->
     (Vine.exp -> bool) -> (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> Vine.typ -> int64 option) -> (Vine.exp -> Vine.exp) -> unit
   method make_snap : unit

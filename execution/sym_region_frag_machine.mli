@@ -69,7 +69,6 @@ sig
     method add_iv : int64 -> Vine.exp -> unit
     method add_iv_reg : int64 -> Vine.var -> Vine.exp -> unit
     method update_ivt : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
-    method update_ivt_reg : (Vine.typ -> Vine.exp -> Vine.exp) -> (Vine.exp -> bool) -> unit
     method print_dt : unit
     method is_iv_cond : Vine.exp -> bool
     method add_g : int64 * Vine.binop_type * Vine.typ * Vine.exp * Vine.exp * Vine.exp * bool * int64 ->
